@@ -6931,11 +6931,12 @@ function ensureDailyChallenges(){
     const need = dailyDeliverNeed(item);
     const spun = !!(S.daily && S.daily.last === day);
     S.challenges = { day, goals: [
-      {id:'deliver', item, need, have:0, rew:5, state:'work', title:'Deliver '+chFmt(need)+' '+(ITEMS[item]&&ITEMS[item].name||item)},
-      {id:'upg', need:3, have:0, rew:7, state:'work', title:'Upgrade 3 buildings'},
-      {id:'spin', need:1, have: spun?1:0, rew:10, state: spun?'ready':'work', title:'Spin the Daily Wheel'}
+      {id:'deliver', item, need, have:0, rew:2, state:'work', title:'Deliver '+chFmt(need)+' '+(ITEMS[item]&&ITEMS[item].name||item)},
+      {id:'upg', need:3, have:0, rew:2, state:'work', title:'Upgrade 3 buildings'},
+      {id:'spin', need:1, have: spun?1:0, rew:2, state: spun?'ready':'work', title:'Spin the Daily Wheel'}
     ] };
   } else {
+    S.challenges.goals.forEach(x => { if (x.state!=='claimed' && (x.rew|0) > 2) x.rew = 2; });
     const g = S.challenges.goals.find(x => x.id==='spin');
     if (g && g.state!=='claimed' && S.daily && S.daily.last===day){
       g.have = 1;
@@ -7044,7 +7045,7 @@ function openDailyChallenges(){
     <div class="dc-head">
       <div>
         <h2>Daily Challenges</h2>
-        <div class="sub dc-sub">${done} of ${n} done · 5–10 ✦ each</div>
+        <div class="sub dc-sub">${done} of ${n} done · 2 ✦ each</div>
       </div>
       <div class="dc-timer">New in <b>${fmtRemain(msUntilMidnight())}</b></div>
     </div>
