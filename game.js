@@ -7008,10 +7008,11 @@ function claimWeekEvent(){
   S.cosOwn = S.cosOwn || {};
   const already = !!S.cosOwn[w.beltId];
   if (!already && COS_BY_ID[w.beltId]) S.cosOwn[w.beltId] = 1;
+  try { if (COS_BY_ID[w.beltId]) equipCosmetic(w.beltId, true); } catch(e){}
   R.dirty = true;
   save();
   const name = weekBeltName(w.beltId);
-  try { toast(already ? (name+' already yours') : (name+' unlocked — equip it in the Style Shop')); confetti(); sfx('quest'); } catch(e){}
+  try { toast(name+' is on! Your belts now use it'); confetti(); sfx('quest'); } catch(e){}
   return true;
 }
 function chIconHTML(g){
@@ -7094,10 +7095,12 @@ function openWeeklyEvent(){
   const cos = COS_BY_ID[w.beltId] || {};
   const st = w.state||'work';
   const live = st!=='claimed';
-  const sub = st==='claimed' ? 'Yours forever · equip from Styles' : 'Exclusive belt color · this week only';
+  const sub = st==='claimed' ? 'Yours forever · turn it on or off below' : 'Exclusive belt color · this week only';
   const action = st==='ready'
     ? `<button class="btn green dc-claim" data-a="claimwk">Claim ${cos.name||'belt color'}</button>`
-    : (st==='claimed' ? `<div class="dc-claimed">Unlocked · equip from Styles</div>` : '');
+    : (st==='claimed' ? (()=>{ const on = !!(S.cosEq && cos.slot && S.cosEq[cos.slot]===w.beltId);
+        return `<div class="dc-claimed">${on?'✅ ON — your belts use '+(cos.name||'this color'):'Off — your belts use your normal color'}</div>
+        <div style="display:flex;gap:8px;margin-top:8px"><button class="btn ${on?'':'green'}" style="flex:1" data-a="wktoggle">${on?'Turn off':'Turn on'}</button><button class="btn" style="flex:1" data-a="wkstyles">🎨 All belt colors</button></div>`; })() : '');
   openSheet(`<div class="shop-tabs"><button class="stab" data-a="back">‹ Menu</button><button class="stab on">Weekly Event</button></div>
     <div class="wk-card ${st}">
       <div class="wk-meta">${live?`<span class="wk-live">${st==='ready'?'CLAIM':'LIVE'}</span>`:`<span class="wk-live done">DONE</span>`}<span class="wk-ends">Ends in <b>${fmtRemain(msUntilWeekEnd())}</b></span></div>
@@ -7118,6 +7121,8 @@ function openWeeklyEvent(){
   navSel('bMenu');
   const back = sheet.querySelector('[data-a=back]'); if (back) back.onclick = () => { sfx('click'); openMenu(); };
   const ck = sheet.querySelector('[data-a=claimwk]'); if (ck) ck.onclick = () => { sfx('click'); if (claimWeekEvent()) openWeeklyEvent(); };
+  const tg = sheet.querySelector('[data-a=wktoggle]'); if (tg) tg.onclick = () => { sfx('click'); equipCosmetic(w.beltId); openWeeklyEvent(); };
+  const sty = sheet.querySelector('[data-a=wkstyles]'); if (sty) sty.onclick = () => { sfx('click'); openCosmetics(); };
   paintWeekBelt(sheet.querySelector('.wk-belt'), cos);
 }
 
