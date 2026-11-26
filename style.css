@@ -1026,3 +1026,26 @@ body.photo-mode #findToast{visibility:hidden!important}
 .wk-rewt small{display:block;font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:#e8c39a;margin-bottom:2px}
 .wk-rewt b{display:block;font-size:18px;font-weight:900;color:#fff}
 .wk-rewt span{display:block;margin-top:2px;font-size:11px;font-weight:700;color:#d7b598;line-height:1.3}
+/* ---- v73 (1.0.5): gold Rebirth/Ascension pill on the quest card + compact My Buildings tray ---- */
+#quest .qt .ww{display:block;font-size:15px;line-height:1.3}
+#quest .qrb{float:right;margin:-1px -2px 2px 8px;padding:2px 10px;border-radius:12px;background:linear-gradient(160deg,#ffe58a,#ffc93c 55%,#f5a623);color:#5c3a00;font-size:14px;font-weight:900;line-height:20px;letter-spacing:.01em;text-transform:none;white-space:nowrap;box-shadow:0 2px 6px rgba(160,100,0,.35),inset 0 0 0 1.5px #e9a21a;cursor:pointer;position:relative;z-index:1}
+#quest .qrb:active{transform:scale(.94)}
+#bBld .ic{font-size:19px}
+html:not(.desk) #sheetWrap.tray.open{pointer-events:none;background:none}
+html:not(.desk) #sheetWrap.tray #sheet{pointer-events:auto;height:32%;max-height:none;overflow:hidden;display:flex;flex-direction:column;padding:10px 14px calc(env(safe-area-inset-bottom) + 8px)}
+html:not(.desk) #sheetWrap.tray #sheet .grab{flex:none;margin:-2px auto 8px}
+.mbt-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;flex:none}
+.mbt-all{border:0;background:#eef0f6;color:#3d4256;font:inherit;font-weight:800;font-size:14px;border-radius:14px;padding:6px 12px;cursor:pointer}
+.mbt-pill{background:linear-gradient(135deg,#7b6cf0,#5a45e0);color:#fff;font-weight:800;font-size:15px;border-radius:16px;padding:6px 16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:60%}
+.mbt-x{border:0;background:#eef0f6;color:#3d4256;font:inherit;font-weight:900;font-size:15px;width:32px;height:32px;border-radius:50%;cursor:pointer;flex:none}
+.mbt-list{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;touch-action:pan-y;display:flex;flex-direction:column;gap:8px;padding:2px 1px 6px}
+.mbt-row{display:flex;align-items:center;gap:10px;width:100%;flex:none;border:2px solid transparent;background:#f3f4f9;border-radius:14px;padding:8px 10px;font:inherit;color:#1d2433;text-align:left;cursor:pointer}
+.mbt-row:active{transform:scale(.985)}
+.mbt-row.on{background:#efeaff;border-color:#a99cf5}
+.mbt-row .mb-ico{flex:none;background:#fff;border-radius:9px}
+.mbt-tx{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:15px}
+.mbt-tx b{font-weight:900}
+.mbt-tx small{font-size:13px;color:#667;font-weight:600}
+.mbt-go{flex:none;font-weight:800;font-size:13px;color:#5a45e0}
+.mbt-row.on .mbt-go{background:#6c5ce7;color:#fff;border-radius:11px;padding:3px 10px}
+html.desk #sheet.mb-tray .mbt-list{overflow:visible}

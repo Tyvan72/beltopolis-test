@@ -102,7 +102,8 @@ const RECIPES = {
 // v69: Move Hub is also in the Menu, so you can start a move without tapping the Hub. The camera jumps to it first.
 // v70: belts merge into same-direction trunks (even from the side) and cross/turn under straight bridge decks, so crowded Hubs still connect; route-fail popup (Move Hub / Hub Extension); Hub Extension perk 5 ✦ (refund 95 ✦ once), unlimited placements; bridge items no longer vanish.
 // v71: faster first Ascension (quest bases 2.1/5.2/6.0, PACE_PROD 0.50, softer late-star quest scale); faster leveling (XP_GROW 1.12, 1.5× item XP) with a keep-your-level curve migrate; Ascend grants 10×★ ✦; Store removed from Rebirth; missing IAPs show Coming soon; permanent 2× Speed Boost IAP ($2.99) with on/off.
-// v72: bigger quest-card era/progress text; building panel pins Upgrade + Max + Pause at the top; Menu Rate Beltopolis row (App Store write-review link) plus requestNativeReview hook after Ascension; My Buildings finder (crafters, megas, Hub only — not harvesters); Daily Challenges (3 goals, +5/+7/+10 PP, local-midnight reset) and Weekly Event (era-scaled goal, exclusive belt color kept forever).
+// v73 (1.0.5): bottom-left Buildings button opens My Buildings; gold Rebirth/Ascension pill moved to the quest card's top-right; My Buildings type rows open a compact docked tray (~32% height) listing every instance — tap a row to center it above the tray (Viewing highlight + map ring/label).
+// v72d: bigger quest-card era/progress text (16px era/progress, 20px quest title); building panel pins Upgrade + Max + Pause at the top; Menu Rate Beltopolis row (App Store write-review link) plus requestNativeReview hook after Ascension; My Buildings finder (crafters, megas, Hub only — not harvesters); Daily Challenges (3 goals, 1 PP each, local-midnight reset) and Weekly Event (era-scaled goal, exclusive belt color kept forever, auto-equip + toggle).
 // v68: Hub can no longer be placed on the map rim (edge margin + zoom-in before placing). Existing edge Hubs are moved on load. Players can Move the Hub from its info sheet.
 // xpv 4 (v67): Lv 1–25 unchanged. Past 25 the curve is gentle (≈linear) so all 40 Medals are reachable:
 //   need(lv) = XP_FLAT * (1 + (lv-26)/XP_FLAT_K)^XP_FLAT_P. Existing xpv-3 saves keep their level; XP-into-level is scaled
@@ -2159,7 +2160,7 @@ function build(type, x, y){
     b.tv = harvTvOf(b);
     if (b.tv == null){ for (const [px,py] of footprint(type,x,y)){ const tv=R.terr[idx(px,py)]; if (BUILDINGS[type].on.includes(tv)){ b.tv = tv; break; } } }
   }
-  if (type==='hub'){ S.hub = b; rebuildOcc(); if (S.terrGen===TERR_GEN_ISLANDS && !S.islandTip){ S.islandTip=1; toast('🏝️ Archipelago — belts auto-build causeways over water to island resources', 4200); } if (R.pendingDaily || dailyState()) offerDailySoon(true); }
+  if (type==='hub'){ S.hub = b; rebuildOcc(); if (S.terrGen===TERR_GEN_ISLANDS && !S.islandTip){ S.islandTip=1; toast('🏝️ Archipelago — belts auto-build causeways over water to island resources', 4200); } if (R.pendingDaily || dailyState()){ if (dailyIntroReady()) offerDailySoon(true); else R.pendingDaily = true; } }
   else {
     S.b.push(b); rebuildOcc();
     if (BUILDINGS[type].landmark){
@@ -2197,6 +2198,8 @@ function build(type, x, y){
       ? '⚠ Rocks he breaks are gone for good — demolish the hut to stop him'
       : '⚠ Trees he cuts are gone for good — demolish the hut to stop him', 3800);
   }
+  // New games: hold the Daily Spin until the first Wood Cutter is belted to the Hub.
+  if ((R.pendingDaily || dailyState()) && dailyIntroReady()) offerDailySoon();
   return b;
 }
 // v70: when a new building truly can't get a belt to any Hub, don't just say no - offer the two real fixes.
@@ -3430,12 +3433,14 @@ const toWorld = (sx,sy) => [(sx-W/2)/cam.z + cam.x, (sy-H/2)/cam.z + cam.y];
 const OV_Z = 9;            // below this scale draw the cheap overview image instead of detailed chunks
 const TAP_ZOOM_Z = 14;     // below this, a tap zooms in instead of opening build menus (no accidental builds)
 function hudInsets(){
-  if (!R.ins || R.insW !== W || R.insH !== H){
+  const tray = !!(R.mbTray && !DESK.on && sheetWrap.classList.contains('tray'));
+  if (!R.ins || R.insW !== W || R.insH !== H || R.insTray !== tray){
     let t = 0, b = 0;
     try { const q = document.getElementById('quest'), st = document.getElementById('stock'), bo = document.getElementById('bottom');
       t = Math.max(q && !DESK.on ? q.getBoundingClientRect().bottom : 0, st ? st.getBoundingClientRect().bottom : 0);
-      b = bo ? H - bo.getBoundingClientRect().top : 0; } catch(e){}
-    R.ins = [Math.max(0, Math.min(t, H*0.4)), Math.max(0, Math.min(b, H*0.3))]; R.insW = W; R.insH = H;
+      b = bo ? H - bo.getBoundingClientRect().top : 0;
+      if (tray) b = Math.max(b, sheet.offsetHeight); } catch(e){}
+    R.ins = [Math.max(0, Math.min(t, H*0.4)), Math.max(0, Math.min(b, H*(tray ? 0.45 : 0.3)))]; R.insW = W; R.insH = H; R.insTray = tray;
   }
   return R.ins;
 }
@@ -3461,6 +3466,7 @@ function zoomTo(x, y, z){ R.zoomAnim = {x, y, z, t:0}; cam.vx = cam.vy = 0; }
 function wholeMap(){ zoomTo(MAP_W/2, MAP_H/2, fitZ()); }
 function stepZoomAnim(dt){
   const a = R.zoomAnim; if (!a) return;
+  a.t = (a.t||0) + dt; if (a.t > 1.6){ cam.z = a.z; cam.x = a.x; cam.y = a.y; clampCam(); R.zoomAnim = null; R.dirty = true; return; }
   const k = 1 - Math.pow(0.0005, dt); // ~0.35s ease
   cam.z = Math.exp(Math.log(cam.z) + (Math.log(a.z) - Math.log(cam.z))*k);
   cam.x += (a.x - cam.x)*k; cam.y += (a.y - cam.y)*k; clampCam();
@@ -4677,6 +4683,7 @@ function frame(now){
   }
   try { drawSel(); } catch(e){}
   try { drawHutFlash(dt); } catch(e){}
+  try { drawMbFocus(); } catch(e){}
   try { drawHutGuides(); } catch(e){}
   try { drawParts(dt); } catch(e){}
   try { drawPausePops(dt); } catch(e){}
@@ -5372,6 +5379,12 @@ function drawHutGuides(){
 
 function tap(sx, sy){
   if (DESK.on) R.dkTab = 'build'; // desktop: docked panel never blocks the map — the click goes straight through
+  else if (sheetWrap.classList.contains('open') && R.mbTray && sheetWrap.classList.contains('tray')){ // v73 tray: map stays live; tap a building for its panel
+    if (cam.z < TAP_ZOOM_Z) return;
+    const [wx,wy] = toWorld(sx,sy), p = pickAt(wx,wy);
+    if (p && p.b){ openInfo(p.b); }
+    return;
+  }
   else if (sheetWrap.classList.contains('open')){ closeSheet(); return; } // sheet backdrop owns dismiss; never build under a sheet
   const badge = pauseBadgeAt(sx, sy);
   if (badge){ resumeFromBadge(badge); return; }
@@ -5414,6 +5427,9 @@ function openSheet(html, onClose, opts){
   sheetWrap.classList.add('open');
   R.onClose = onClose;
   sheet.classList.toggle('has-bld-head', !!opts.pin);
+  sheetWrap.classList.toggle('tray', !!opts.tray); sheet.classList.toggle('mb-tray', !!opts.tray);
+  if (!opts.tray){ R.mbTray = null; R.mbFocus = null; }
+  R.ins = null;
   sheet.scrollTop = 0;
   const sc = sheetScroller();
   if (sc !== sheet){
@@ -5426,7 +5442,7 @@ function openSheet(html, onClose, opts){
   if (DESK.on) deskSync();
 }
 function navSel(id){ document.querySelectorAll('#bottom .nav').forEach(el => el.classList.toggle('sel', !!id && el.id===id)); }
-function closeSheet(){ navSel(null); sheetWrap.classList.remove('open'); R.dkTab = 'build'; if (DESK.on) deskSync(); sheet.classList.remove('sheet-more','has-bld-head'); R.sel = null; if (R.onClose){ const f=R.onClose; R.onClose=null; f(); } if (R.pendingDaily) offerDailySoon(); else if (R.pendingEraNews || needsEraNews()) offerEraNewsSoon(); }
+function closeSheet(){ navSel(null); sheetWrap.classList.remove('open','tray'); sheet.classList.remove('mb-tray'); R.mbTray = null; R.mbFocus = null; R.ins = null; R.dkTab = 'build'; if (DESK.on) deskSync(); sheet.classList.remove('sheet-more','has-bld-head'); R.sel = null; if (R.onClose){ const f=R.onClose; R.onClose=null; f(); } if (R.pendingDaily) offerDailySoon(); else if (R.pendingEraNews || needsEraNews()) offerEraNewsSoon(); }
 // Tap the dimmed game band above the sheet to dismiss — never let that tap reach the canvas/build
 sheetWrap.addEventListener('pointerdown', e => {
   if (e.target !== sheetWrap) return;
@@ -6371,8 +6387,9 @@ function goToBuilt(type){
   showFindToast(list.length>1 ? (shown+' of '+list.length+'  •  tap again for next') : name);
   return b;
 }
-function openMyBuildings(){
+function openMyBuildings(from){
   R.dkTab = 'menu';
+  if (from) R.mbFrom = from; else if (!R.mbTray) R.mbFrom = 'menu';
   const groups = buildingsByType();
   const total = groups.reduce((n,g)=>n+g.n, 0);
   const rows = groups.map(g => `<button type="button" class="mb-row" data-type="${g.type}">
@@ -6383,9 +6400,9 @@ function openMyBuildings(){
     </button>`).join('');
   openSheet(`<div class="shop-tabs"><button class="stab" data-a="back">‹ Menu</button><button class="stab on">My Buildings</button></div>
     <h2>My Buildings</h2>
-    <div class="sub">${total? (total+' built · tap a row to jump there') : 'No workshops, smelters, or hubs placed yet.'}</div>
+    <div class="sub">${total? (total+' built · tap a type to list each one') : 'No workshops, smelters, or hubs placed yet.'}</div>
     <div class="mb-list">${rows||''}</div>`);
-  navSel('bMenu');
+  navSel(R.mbFrom==='bld' ? 'bBld' : 'bMenu');
   const back = sheet.querySelector('[data-a=back]'); if (back) back.onclick = () => { sfx('click'); openMenu(); };
   sheet.querySelectorAll('.mb-ico').forEach(cv => {
     const type = cv.dataset.type, dpr = Math.min(2, window.devicePixelRatio||1), s = 44;
@@ -6397,8 +6414,87 @@ function openMyBuildings(){
     try { drawBuildingIcon(c, type, s/2, s/2+2, s*0.92); } catch(e){}
   });
   sheet.querySelectorAll('.mb-row').forEach(btn => {
-    btn.onclick = ev => { ev.preventDefault(); ev.stopPropagation(); goToBuilt(btn.dataset.type); };
+    btn.onclick = ev => { ev.preventDefault(); ev.stopPropagation(); sfx('click'); openMyBuildingsType(btn.dataset.type); };
   });
+}
+// ---- v73: compact docked tray listing every built instance of one type ----
+function mbPlural(name, n){ return n > 1 && !/s$/i.test(name) ? name + 's' : name; }
+function mbStatus(b){
+  if (b === S.hub || b.type==='hub' || b.type==='megaHub') return 'Receiving deliveries';
+  if (b.paused) return 'Paused';
+  if (!b.recipe || !ITEMS[b.recipe]) return 'Idle';
+  return 'Making ' + ITEMS[b.recipe].name;
+}
+function mbInstName(b, list){ const i = list.indexOf(b); const nm = (BUILDINGS[b.type] && BUILDINGS[b.type].name) || b.type; return list.length > 1 ? `${nm} #${i+1}` : nm; }
+function mbFindUid(uid){ if (S.hub && S.hub.uid === uid) return S.hub; if (Array.isArray(S.b)) for (const o of S.b) if (o && o.uid === uid) return o; return null; }
+function openMyBuildingsType(type, uid){
+  const list = buildingsOfType(type);
+  if (!list.length){ openMyBuildings(); return; }
+  let cur = uid!=null ? list.find(b => b.uid === uid) : null;
+  if (!cur) cur = list[0];
+  const B = BUILDINGS[type] || {name:type};
+  const rows = list.map((b, i) => `<button type="button" class="mbt-row${b===cur?' on':''}" data-uid="${b.uid}">
+      <canvas class="mb-ico" data-type="${b.type}" width="36" height="36" aria-hidden="true"></canvas>
+      <span class="mbt-tx"><b>${mbInstName(b, list)}</b><small> · Lv ${b.lv||1} · ${mbStatus(b)}</small></span>
+      <span class="mbt-go">${b===cur ? 'Viewing' : 'Jump ›'}</span>
+    </button>`).join('');
+  R.mbTray = {type};
+  openSheet(`<div class="mbt-head"><button type="button" class="mbt-all" data-a="all">‹ All</button><span class="mbt-pill">${mbPlural(B.name||type, list.length)} (${list.length})</span><button type="button" class="mbt-x" data-a="x" aria-label="Close">✕</button></div>
+    <div class="mbt-list">${rows}</div>`, null, {tray:true});
+  R.mbTray = {type};
+  navSel(R.mbFrom==='bld' ? 'bBld' : 'bMenu');
+  sheet.querySelectorAll('.mb-ico').forEach(cv => {
+    const t = cv.dataset.type, dpr = Math.min(2, window.devicePixelRatio||1), sz = 36;
+    cv.width = sz*dpr; cv.height = sz*dpr; cv.style.width = sz+'px'; cv.style.height = sz+'px';
+    const c = cv.getContext('2d'); c.setTransform(dpr,0,0,dpr,0,0); c.clearRect(0,0,sz,sz);
+    try { drawBuildingIcon(c, t, sz/2, sz/2+2, sz*0.92); } catch(e){}
+  });
+  sheet.querySelector('[data-a=all]').onclick = ev => { ev.stopPropagation(); sfx('click'); openMyBuildings(); };
+  sheet.querySelector('[data-a=x]').onclick = ev => { ev.stopPropagation(); sfx('click'); closeSheet(); };
+  sheet.querySelectorAll('.mbt-row').forEach(btn => {
+    btn.onclick = ev => { ev.preventDefault(); ev.stopPropagation(); const b = mbFindUid(+btn.dataset.uid); if (!b){ openMyBuildingsType(type); return; } sfx('click'); mbFocus(b); };
+  });
+  mbFocus(cur, true);
+}
+function mbFocus(b, first){
+  if (!b || !BUILDINGS[b.type]) return;
+  R.mbFocus = b.uid;
+  sheet.querySelectorAll('.mbt-row').forEach(el => {
+    const on = +el.dataset.uid === b.uid;
+    el.classList.toggle('on', on);
+    const g = el.querySelector('.mbt-go'); if (g) g.textContent = on ? 'Viewing' : 'Jump ›';
+    if (on && !first){ try { el.scrollIntoView({block:'nearest', behavior:'smooth'}); } catch(e){ el.scrollIntoView(false); } }
+  });
+  R.ins = null;
+  const s = BUILDINGS[b.type].size, cx = b.x + s/2, cy = b.y + s/2;
+  const z = 48, [t, bt] = hudInsets();
+  const midY = (t + (H - bt)) / 2;            // centre of the visible map band (below HUD, above tray/bottom bar)
+  zoomTo(cx, cy - (midY - H/2)/z, z);
+  b.pop = 1; R.dirty = true;
+}
+// world → screen position the tray focus should land on (used by tests)
+function mbFocusTarget(){ const [t, bt] = hudInsets(); return {x: W/2, y: (t + (H - bt))/2, top: t, bottom: H - bt}; }
+function drawMbFocus(){
+  if (R.mbFocus == null || !R.mbTray) return;
+  const b = mbFindUid(R.mbFocus); if (!b || !BUILDINGS[b.type]) return;
+  const s = BUILDINGS[b.type].size, z = cam.z, [sx, sy] = toScreen(b.x + s/2, b.y + s/2);
+  const pulse = 0.5 + 0.5*Math.sin(R.time*5);
+  const half = s*z/2 + 6 + pulse*3;
+  ctx.save();
+  ctx.shadowColor = 'rgba(108,92,231,.85)'; ctx.shadowBlur = 18 + pulse*10;
+  ctx.strokeStyle = `rgba(124,108,240,${0.75+0.25*pulse})`; ctx.lineWidth = Math.max(3, z*0.07);
+  rr(ctx, sx-half, sy-half, half*2, half*2, Math.max(8, z*0.22)); ctx.stroke();
+  ctx.shadowBlur = 0;
+  const list = buildingsOfType(b.type);
+  const label = `${mbInstName(b, list)} · Lv ${b.lv||1}`;
+  ctx.font = '800 14px -apple-system,Segoe UI,sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  const tw = ctx.measureText(label).width, ph = 28;
+  let ly = sy - half - 12 - ph/2; ly = Math.max(ph/2 + 4, ly);
+  const lx = Math.max(tw/2 + 18, Math.min(W - tw/2 - 18, sx));
+  ctx.fillStyle = 'rgba(28,30,44,.92)'; rr(ctx, lx - tw/2 - 12, ly - ph/2, tw + 24, ph, ph/2); ctx.fill();
+  ctx.strokeStyle = 'rgba(124,108,240,.95)'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.fillStyle = '#fff'; ctx.fillText(label, lx, ly + 1);
+  ctx.restore();
 }
 
 function openMenu(){
@@ -6446,7 +6542,7 @@ function openMenu(){
   sheet.querySelector('[data-a=x]').onclick = closeSheet;
   sheet.querySelector('[data-a=snd]').onclick = () => { S.sound = !S.sound; if (S.sound){ unlockAudio(); setTimeout(()=>sfx('collect'), 60); } else { audioSession(false); if (AC) AC.suspend().catch(()=>{}); } save(); openMenu(); };
   const bst = sheet.querySelector('[data-a=boost]'); if (bst) bst.onclick = () => { sfx('click'); setBoostOn(!boostOn()); toast(boostOn() ? '⚡ Speed Boost on — 2× factory speed' : 'Speed Boost off', 2200); openMenu(); };
-  const rs = sheet.querySelector('[data-a=reset]'); rs.onclick = () => { if (rs.dataset.c){ const snd = S.sound; S = freshState(); S.sound = snd; setupWorld(); cam.x = MAP_W/2; cam.y = MAP_H/2; R.simClock = Date.now(); closeSheet(); R.dirty=true; save(); R.pendingDaily = true; toast('New game — place your Hub, then claim today’s free Daily Spin', 3200); } else { rs.dataset.c=1; rs.textContent=`Tap again: erase ${slotName(META.active)}`; } };
+  const rs = sheet.querySelector('[data-a=reset]'); rs.onclick = () => { if (rs.dataset.c){ const snd = S.sound; S = freshState(); S.sound = snd; setupWorld(); cam.x = MAP_W/2; cam.y = MAP_H/2; R.simClock = Date.now(); closeSheet(); R.dirty=true; save(); R.pendingDaily = true; toast('New game — place your Hub and connect your first Wood Cutter, then claim today’s free Daily Spin', 3600); } else { rs.dataset.c=1; rs.textContent=`Tap again: erase ${slotName(META.active)}`; } };
 }
 function slotSummary(d){
   if (!d) return null;
@@ -6486,8 +6582,10 @@ function welcomeBack(sec, gains){
     <div class="row"><button class="btn green" data-a="x">Collect</button></div></div>`);
   sheet.querySelector('[data-a=x]').onclick = () => { closeSheet(); confetti(); sfx('collect'); };
 }
-$('rbTile').onclick = () => { sfx('click'); toast(S.rebirths || ascN() ? `${ascN()?'Ascension ★'+ascN()+' · ':''}Rebirth #${S.rebirths} · ${eraLabel(S.rebirths)} · ${ERAS[S.rebirths] ? ERAS[S.rebirths].name : ''}` : 'No rebirths yet — finish this era\'s quest!'); };
-$('bPerk').onclick = () => { sfx('click'); openPerks(); }; $('quest').onclick = () => { sfx('click'); if (S.finalDone) openPerks(); else { const q = eraQuest(S.rebirths); openRecipeTree(q.item); } }; if ($('bMap')) $('bMap').onclick = () => { sfx('click'); closeSheet(); if (cam.z > fitZ()*1.25){ R.prevView = {x:cam.x, y:cam.y, z:cam.z}; wholeMap(); navSel('bMap'); } else { const v = R.prevView || (S.hub ? {x:S.hub.x+1.5, y:S.hub.y+1.5, z:44} : {x:MAP_W/2, y:MAP_H/2, z:44}); zoomTo(v.x, v.y, Math.max(30, v.z)); navSel(null); } };
+function rbPillHTML(){ const an = ascN(); return `<span class="qrb" role="button" aria-label="Rebirth and Ascension">#${S.rebirths|0}${an ? ' · ★'+an : ''}</span>`; }
+function rbToast(){ toast(S.rebirths || ascN() ? `${ascN()?'Ascension ★'+ascN()+' · ':''}Rebirth #${S.rebirths} · ${eraLabel(S.rebirths)} · ${ERAS[S.rebirths] ? ERAS[S.rebirths].name : ''}` : 'No rebirths yet — finish this era\'s quest!'); }
+if ($('bBld')) $('bBld').onclick = () => { sfx('click'); if (sheetWrap.classList.contains('open') && (R.mbFrom==='bld') && (R.mbTray || sheet.querySelector('.mb-list'))){ closeSheet(); return; } openMyBuildings('bld'); };
+$('bPerk').onclick = () => { sfx('click'); openPerks(); }; $('quest').onclick = e => { sfx('click'); if (e && e.target && e.target.closest && e.target.closest('.qrb')){ e.stopPropagation(); rbToast(); return; } if (S.finalDone) openPerks(); else { const q = eraQuest(S.rebirths); openRecipeTree(q.item); } }; if ($('bMap')) $('bMap').onclick = () => { sfx('click'); closeSheet(); if (cam.z > fitZ()*1.25){ R.prevView = {x:cam.x, y:cam.y, z:cam.z}; wholeMap(); navSel('bMap'); } else { const v = R.prevView || (S.hub ? {x:S.hub.x+1.5, y:S.hub.y+1.5, z:44} : {x:MAP_W/2, y:MAP_H/2, z:44}); zoomTo(v.x, v.y, Math.max(30, v.z)); navSel(null); } };
 $('bMenu').onclick = () => { sfx('click'); openMenu(); };
 function goToHub(){
   closeSheet();
@@ -6661,10 +6759,10 @@ function updateUI(){
   try { ensureEvents(); } catch(e){}
   const qe = $('quest'), q = eraQuest(S.rebirths);
   if (!S.finalDone){ const n = q.n, f = Math.min(1, S.qprog/n);
-    const ww = world(); const qh = `<div class="qi">${img(q.item)}</div><div class="qb"><div class="qt">${eraLabel(S.rebirths)} · ${eraName(S.rebirths)} · <span class="ww">${ww.ic} ${ww.name}</span></div><div class="qn">Deliver ${fmt(n)} ${ITEMS[q.item].name}</div><div class="bar"><i style="width:${f*100}%"></i></div><div class="qr"><b>${fmt(S.qprog)}/${fmt(n)}</b> · then Rebirth for +1 ✦</div></div>`;
+    const ww = world(); const qh = `<div class="qi">${img(q.item)}</div><div class="qb"><div class="qt">${rbPillHTML()}${eraLabel(S.rebirths)} · ${eraName(S.rebirths)}<span class="ww">${ww.ic} ${ww.name}</span></div><div class="qn">Deliver ${fmt(n)} ${ITEMS[q.item].name}</div><div class="bar"><i style="width:${f*100}%"></i></div><div class="qr"><b>${fmt(S.qprog)}/${fmt(n)}</b> · then Rebirth for +1 ✦</div></div>`;
     if (qe.dataset.h !== qh){ qe.dataset.h = qh; qe.innerHTML = qh; qe.classList.remove('ready'); }
   } else {
-    const qh = `<div class="qi" style="font-size:26px">🌟</div><div class="qb"><div class="qt">${eraLabel(S.rebirths)} complete!</div><div class="qn">Tap here to Rebirth (+1 ✦)</div><div class="qr">Next: ${eraName(S.rebirths+1)} · ${eraReveal(S.rebirths+1).text}</div></div>`;
+    const qh = `<div class="qi" style="font-size:26px">🌟</div><div class="qb"><div class="qt">${rbPillHTML()}${eraLabel(S.rebirths)} complete!</div><div class="qn">Tap here to Rebirth (+1 ✦)</div><div class="qr">Next: ${eraName(S.rebirths+1)} · ${eraReveal(S.rebirths+1).text}</div></div>`;
     if (qe.dataset.h !== qh){ qe.dataset.h = qh; qe.innerHTML = qh; qe.classList.add('ready'); }
   }
   const keys = Object.keys(ITEMS).filter(k => (S.stock[k]||0) > 0 || (S.totalDelivered[k]||0) > 0);
@@ -6674,9 +6772,7 @@ function updateUI(){
     if (q.textContent !== v){ q.textContent = v; if (lastStock[k]!==undefined && (S.stock[k]||0) > lastStock[k]){ ch.classList.remove('bump'); void ch.offsetWidth; ch.classList.add('bump'); } } }
   lastStock = {...S.stock};
   $('bPerk').classList.toggle('glow', !!S.finalDone);
-  { const n = String(S.rebirths||0); if ($('rbNum').textContent !== n) $('rbNum').textContent = n;
-    const an = ascN(), at = an ? '★'+an : ''; if ($('ascNum').textContent !== at){ $('ascNum').textContent = at; $('ascNum').classList.toggle('show', an>0); }
-    const pp = S.pp||0, bd = $('ppBadge'), canBuy = PERKS.some(p => perk(p.id) < p.max && pp >= perkCost(p.id)); const t = pp ? '✦'+pp : '';
+  { const pp = S.pp||0, bd = $('ppBadge'), canBuy = PERKS.some(p => perk(p.id) < p.max && pp >= perkCost(p.id)); const t = pp ? '✦'+pp : '';
     if (bd.textContent !== t) bd.textContent = t; bd.classList.toggle('show', pp > 0); $('bPerk').classList.toggle('has', canBuy && !S.finalDone); }
   try { updateHutLocators(); } catch(e){}
   try { updateXpBar(); } catch(e){}
@@ -7246,15 +7342,37 @@ function prizeTxt(pr){
 function dailyState(){ const d = S.daily, t = today(); if (d.last === t) return null;
   const day = d.last && dayGap(d.last, t) === 1 ? (d.streak % 7) + 1 : 1; return {day, reset: !!d.last && dayGap(d.last, t) > 1 && d.streak > 0}; }
 function trackDay(){ if (!S || !S.stats) return; const t = today(); if (S.stats.lastDay !== t){ if (S.stats.days == null) S.stats.days = (S.daily&&S.daily.claims)|0; S.stats.days = (S.stats.days|0)+1; S.stats.lastDay = t; } }
+function isWoodCutter(b){ return !!(b && (b.type==='cutter' || b.type==='megaCutter')); }
+function cutterBelted(b){ return !!(isWoodCutter(b) && b.outPath && b.outPath.tiles && b.outPath.tiles.length); }
+function firstCutterConnected(){
+  if (S && S.seenFirstCutter) return true;
+  if (S && S.hub && Array.isArray(S.b) && S.b.some(cutterBelted)){ S.seenFirstCutter = 1; return true; }
+  return false;
+}
+function dailyIntroReady(){
+  // Existing / returning players who already got past the first production line
+  // should see the Daily Spin as before. New games wait for a belted Wood Cutter.
+  // Do not use stats.built / stats.days: placing the Hub and boot's trackDay()
+  // increment those before the first cutter exists.
+  if (firstCutterConnected()) return true;
+  if (!S) return false;
+  if ((S.rebirths|0) > 0 || (S.asc|0) > 0) return true;
+  if (S.daily && (S.daily.claims|0) > 0) return true;
+  if (S.totalDelivered && Object.keys(S.totalDelivered).some(k => (S.totalDelivered[k]|0) > 0)) return true;
+  if (S.built && Object.keys(S.built).some(k => (S.built[k]|0) > 0 && k.split(',')[0] !== 'hub')) return true;
+  return false;
+}
 function maybeDaily(force){
   trackDay(); if (window.AF_NODAILY || !S || $('celebrate')?.classList.contains('show')) return false;
   // restore a result that was credited but not yet acknowledged (reload mid-spin) — even over a sheet
   if (S.daily && S.daily.spin && S.daily.spin.day === today() && !S.daily.spin.shown){ openSpinResult(S.daily.spin); return true; }
   if (dailyState() === null) return false;
   if ($('daily')?.classList.contains('show')) return true; // already offering
-  // Brand-new / reset games: wait until the Hub is placed so the wheel isn't missed under the "place Hub" hint.
-  // Menu can force-open earlier (openDaily). Reset/New Game sets R.pendingDaily so Hub placement opens it.
-  if (!force && !S.hub){ R.pendingDaily = true; return false; }
+  // Brand-new / reset games: wait until the first Wood Cutter is connected to the Hub
+  // so the wheel doesn't cover that first belt line. Menu can still force-open earlier
+  // (openDaily). Existing factories (already past that point) offer it once a Hub is present.
+  if (!S.hub){ R.pendingDaily = true; return false; }
+  if (!dailyIntroReady()){ R.pendingDaily = true; return false; }
   // Defer under offline/welcome/menus so the wheel isn't buried or swapped for another modal
   if (sheetWrap.classList.contains('open')){ R.pendingDaily = true; return false; }
   R.pendingDaily = false; openDaily(); return true;
@@ -7985,6 +8103,6 @@ setInterval(save, 5000);
 if ('serviceWorker' in navigator && location.protocol==='https:') navigator.serviceWorker.register('sw.js').catch(()=>{});
 requestAnimationFrame(t => { lastT = t; requestAnimationFrame(frame); });
 // test hooks
-window.AF = { DESK, deskSync, closeSheet, openMenu, openStore, openCosmetics, openReviewPage, requestNativeReview, REVIEW_URL, isFindableBuilding, openMyBuildings, goToBuilt, buildingsByType, showFindToast, ensureEvents, ensureDailyChallenges, ensureWeekEvent, noteChProgress, claimChallenge, claimWeekEvent, openDailyChallenges, openWeeklyEvent, dailyChCounts, weekStartKey, clockDate, fmtRemain, WEEK_BELTS, IAP, IAP_IDS, iapInit, iapHandleTx, iapBuy, iapRestore, openIapScreen, applyRespec, perkSpent, ascGated, BUILD_ORDER, HUT_WALK, HUT_CHOP, HUT_REACH, HUT_HITS, HUT_PAYOUT, isHut, hutTv, hutItem, hutCenter, hutFindTarget, hutDoHit, hutWearLeft, stepHut, flowHut, hutReach, hutDismiss, hutRelink, hutCrewN, hutWalkSp, hutChopT, hutUpgCost, hutBuyUpg, openHutInfo, hutsOf, goToHut, goToHub, updateHutLocators, HUT_LOC_Z, BUILDING_OUTLINE, BUILDING_OUTLINE_COLOR, buildingOutlineW, strokeBuildingOutline, craftRate, harvTvOf, repairHarvesterTerrain, migrateMapCoords, migrateHubFromEdge, moveHubTo, findHubSafeSpot, startHubMove, cancelHubMove, endHubMove, openHubMovePlace, hubFits, hubEdgePad, hubEdgeErr, clampHubPlace, HUB_EDGE, lvSpeed, lvDouble, lvCost, migrateBuildingLv, MAX_LV, harvestItem, harvestMul, craftMul, beltSpeed, perkSpeed, paceQuest, PERKS, perkCost, megaUnlocked, openRecipeBook, openRecipeTree, crafterOf, updateUI, WORLDS, world, worldOf, worldIdx, worldName, worldPreview, applyWorldFrame, mixHex, setWorld(i){ R.forceWorld = i==null?null:(i%WORLDS.length); if (R.terr) renderTerrain(); else applyWorldFrame(); R.dirty=true; }, trackDay, cosOn, ACH, checkAch, openAch, openDaily, claimDaily, dailyState, maybeDaily, offerDailySoon, spinSlices, startSpin, pickSpin, prizeGrant, today, dayGap, prodMul, goldHub, retainInit, DAILY, gainXp, itemXp, xpNeed, xpNeedV3, xpPpAt, xpNextPp, XP_BASE, XP_GROW, XP_PP_EVERY, XP_CURVE_V, migrateXpReset, migrateAllSlotsXp, BASE_ERAS, MAX_ERAS, BASE_LAST, cycleLen, capOf, lastEraOf, migrateEraCap, POST_ERAS, POST_ART, applyPostQuantum, drawPauseBadge, pauseBadgeAt, pauseBadgeLayout, resumeFromBadge, COSMETICS, COS_BY_ID, MAP_PALETTES, beltSkin, beltPalette, skinHex, applyMapTheme, paintBuildCosmetic, rainbowHex, cosOwned, cosEq, buyCosmetic, equipCosmetic, openCosmetics, updateXpBar, celebrateLevel, flushLevelUp, xpLive, TEST_MODE, TEST_PP, testPPAmount, bootTestSandbox, refreshSandboxBadge, sandboxBadgeText, harvKeyOf, costOf, canPay, goldBonusLine, megaBlurb, bKey, drillOreTv, isLandType, isLandB, LAND_ORDER, LAND_OLD_SIZE, startLandmarkPlace, finishLandmarkTap, snapshotLandmarks, restoreLandmarks, migrateLandmarkScale, landFitErr, enterPhotoMode, exitPhotoMode, captureFactoryPhoto, shareFactoryPhoto, takeFactoryPhoto, showPhotoPreview, sharePhotoFromPreview, sharePreparedPhoto, closePhotoPreview, photoLooksValid, photoShareFile, formSetId, formKind, drawFormBuilding, drawFormIcon, formSetIcon, HUT_PLACE_MAX, isHutType, hutPlaced, hutSlotsLeft, hutAtCap, placeCheck, footprint, openBuildMenu, build, demolish, doRebirth, MAP_W, MAP_H, GRASS, TREE, STONE, IRON, SILVER, get terr(){return R.terr;}, get cam(){return cam;}, get bridges(){return R.bridges;}, recountBelts, routeBuilding, routeBuildingSafe, pickRoute, unroute, routeAllBuildings, beltConflicts, beltBlocked, needsBelt, celebrateAscension, eraUnlockOf, eraUnlockHTML, needsEraNews, markEraNews, maybeEraNews, showEraNewsCatchup, isGoldB, isGoldKey, ASC_ORDER, ASC_SPEED, ivOf, pickAt, get W(){return W;}, get H(){return H;}, get S(){return S;}, get multi(){return R.multi;}, openBulk, selectAllOfType, planNext, planTo, planTotal, affordable, removeRefund, exitMulti, toggleMulti, clearTile, clearCheck, CLEAR_YIELD, openBuildMenu, dblCost, DBL_CHANCE, tierCost, tierMul, openInfo, findRoute, placeCheck, setRecipe, costOf, canPay, bKey, nBuilt, recountBuilt, growthMul, reset(seed, era){ S = era ? freshState({rebirths:era, pp:0, perks:{}, sound:S.sound, ...retainKeep(S)}) : freshState(); if (seed) S.seed = seed; setupWorld(); R.dirty = true; R.pendingDaily = !!dailyState(); }, R, cam, build, tap, toWorld, toScreen, ERAS, eraQuest, eraUnlocks, eraReveal, eraName, eraLabel, doRebirth, celebrate, openPerks, RES, RES_BY_KEY, ORE_T, ITEMS, gotoEra(e, pp, seed, asc){ S = freshState({rebirths:e, asc: asc===undefined ? S.asc|0 : asc, pp:pp||0, perks:S.perks, sound:S.sound, ...retainKeep(S)}); if (seed) S.seed = seed; setupWorld(); cam.x = MAP_W/2; cam.y = MAP_H/2; R.dirty = true; }, migrateFishRemoval, migrateHutRemoval, migrateSurveyRemoval, migrateOuterResources, paintOuterResources, isIslandAsc, terrGenForAsc, islandGen, islandLayoutId, islandThemeId, islandLook, ISLAND_THEME, repairIslandResources, genIslandMapLegacy, TERR_GEN_LAND, TERR_GEN_ISLANDS, genMap, genIslandMap, spinStreakInfo, spinItemAmount, spinPrizeItems, jackpotSlice, SPIN_PP_FRAC, SPIN_JACK_FRAC, fitZ, clampCam, wholeMap, zoomTo, hudInsets, OV_Z, TAP_ZOOM_Z, BUILDINGS, idx, MAP_W, MAP_H, TREE:TREE, STONE, GRASS, drawItem, drawBuildingIcon, save, load, switchSlot, get AC(){return AC;}, get MASTER(){return MASTER;}, unlockAudio, sfx, get silentEl(){return silentEl;}, IOS, deleteSlot, renameSlot, get META(){return META;}, slotData, slotKey, SAVE_KEY, META_KEY, offlineProgress, catchUp, welcomeBack, doRebirth, completeQuest, step: simulate, RECIPES, has, reserveOf, bundle, packTxt, rTxt, grant, itemKnown, deliver };
+window.AF = { DESK, deskSync, closeSheet, openMenu, openStore, openCosmetics, openReviewPage, requestNativeReview, REVIEW_URL, isFindableBuilding, openMyBuildings, openMyBuildingsType, mbFocus, mbFocusTarget, mbFindUid, rbToast, goToBuilt, buildingsByType, showFindToast, ensureEvents, ensureDailyChallenges, ensureWeekEvent, noteChProgress, claimChallenge, claimWeekEvent, openDailyChallenges, openWeeklyEvent, dailyChCounts, weekStartKey, clockDate, fmtRemain, WEEK_BELTS, IAP, IAP_IDS, iapInit, iapHandleTx, iapBuy, iapRestore, openIapScreen, applyRespec, perkSpent, ascGated, BUILD_ORDER, HUT_WALK, HUT_CHOP, HUT_REACH, HUT_HITS, HUT_PAYOUT, isHut, hutTv, hutItem, hutCenter, hutFindTarget, hutDoHit, hutWearLeft, stepHut, flowHut, hutReach, hutDismiss, hutRelink, hutCrewN, hutWalkSp, hutChopT, hutUpgCost, hutBuyUpg, openHutInfo, hutsOf, goToHut, goToHub, updateHutLocators, HUT_LOC_Z, BUILDING_OUTLINE, BUILDING_OUTLINE_COLOR, buildingOutlineW, strokeBuildingOutline, craftRate, harvTvOf, repairHarvesterTerrain, migrateMapCoords, migrateHubFromEdge, moveHubTo, findHubSafeSpot, startHubMove, cancelHubMove, endHubMove, openHubMovePlace, hubFits, hubEdgePad, hubEdgeErr, clampHubPlace, HUB_EDGE, lvSpeed, lvDouble, lvCost, migrateBuildingLv, MAX_LV, harvestItem, harvestMul, craftMul, beltSpeed, perkSpeed, paceQuest, PERKS, perkCost, megaUnlocked, openRecipeBook, openRecipeTree, crafterOf, updateUI, WORLDS, world, worldOf, worldIdx, worldName, worldPreview, applyWorldFrame, mixHex, setWorld(i){ R.forceWorld = i==null?null:(i%WORLDS.length); if (R.terr) renderTerrain(); else applyWorldFrame(); R.dirty=true; }, trackDay, cosOn, ACH, checkAch, openAch, openDaily, claimDaily, dailyState, maybeDaily, offerDailySoon, isWoodCutter, cutterBelted, firstCutterConnected, dailyIntroReady, spinSlices, startSpin, pickSpin, prizeGrant, today, dayGap, prodMul, goldHub, retainInit, DAILY, gainXp, itemXp, xpNeed, xpNeedV3, xpPpAt, xpNextPp, XP_BASE, XP_GROW, XP_PP_EVERY, XP_CURVE_V, migrateXpReset, migrateAllSlotsXp, BASE_ERAS, MAX_ERAS, BASE_LAST, cycleLen, capOf, lastEraOf, migrateEraCap, POST_ERAS, POST_ART, applyPostQuantum, drawPauseBadge, pauseBadgeAt, pauseBadgeLayout, resumeFromBadge, COSMETICS, COS_BY_ID, MAP_PALETTES, beltSkin, beltPalette, skinHex, applyMapTheme, paintBuildCosmetic, rainbowHex, cosOwned, cosEq, buyCosmetic, equipCosmetic, openCosmetics, updateXpBar, celebrateLevel, flushLevelUp, xpLive, TEST_MODE, TEST_PP, testPPAmount, bootTestSandbox, refreshSandboxBadge, sandboxBadgeText, harvKeyOf, costOf, canPay, goldBonusLine, megaBlurb, bKey, drillOreTv, isLandType, isLandB, LAND_ORDER, LAND_OLD_SIZE, startLandmarkPlace, finishLandmarkTap, snapshotLandmarks, restoreLandmarks, migrateLandmarkScale, landFitErr, enterPhotoMode, exitPhotoMode, captureFactoryPhoto, shareFactoryPhoto, takeFactoryPhoto, showPhotoPreview, sharePhotoFromPreview, sharePreparedPhoto, closePhotoPreview, photoLooksValid, photoShareFile, formSetId, formKind, drawFormBuilding, drawFormIcon, formSetIcon, HUT_PLACE_MAX, isHutType, hutPlaced, hutSlotsLeft, hutAtCap, placeCheck, footprint, openBuildMenu, build, demolish, doRebirth, MAP_W, MAP_H, GRASS, TREE, STONE, IRON, SILVER, get terr(){return R.terr;}, get cam(){return cam;}, get bridges(){return R.bridges;}, recountBelts, routeBuilding, routeBuildingSafe, pickRoute, unroute, routeAllBuildings, beltConflicts, beltBlocked, needsBelt, celebrateAscension, eraUnlockOf, eraUnlockHTML, needsEraNews, markEraNews, maybeEraNews, showEraNewsCatchup, isGoldB, isGoldKey, ASC_ORDER, ASC_SPEED, ivOf, pickAt, get W(){return W;}, get H(){return H;}, get S(){return S;}, get multi(){return R.multi;}, openBulk, selectAllOfType, planNext, planTo, planTotal, affordable, removeRefund, exitMulti, toggleMulti, clearTile, clearCheck, CLEAR_YIELD, openBuildMenu, dblCost, DBL_CHANCE, tierCost, tierMul, openInfo, findRoute, placeCheck, setRecipe, costOf, canPay, bKey, nBuilt, recountBuilt, growthMul, reset(seed, era){ S = era ? freshState({rebirths:era, pp:0, perks:{}, sound:S.sound, ...retainKeep(S)}) : freshState(); if (seed) S.seed = seed; setupWorld(); R.dirty = true; R.pendingDaily = !!dailyState(); }, R, cam, build, tap, toWorld, toScreen, ERAS, eraQuest, eraUnlocks, eraReveal, eraName, eraLabel, doRebirth, celebrate, openPerks, RES, RES_BY_KEY, ORE_T, ITEMS, gotoEra(e, pp, seed, asc){ S = freshState({rebirths:e, asc: asc===undefined ? S.asc|0 : asc, pp:pp||0, perks:S.perks, sound:S.sound, ...retainKeep(S)}); if (seed) S.seed = seed; setupWorld(); cam.x = MAP_W/2; cam.y = MAP_H/2; R.dirty = true; }, migrateFishRemoval, migrateHutRemoval, migrateSurveyRemoval, migrateOuterResources, paintOuterResources, isIslandAsc, terrGenForAsc, islandGen, islandLayoutId, islandThemeId, islandLook, ISLAND_THEME, repairIslandResources, genIslandMapLegacy, TERR_GEN_LAND, TERR_GEN_ISLANDS, genMap, genIslandMap, spinStreakInfo, spinItemAmount, spinPrizeItems, jackpotSlice, SPIN_PP_FRAC, SPIN_JACK_FRAC, fitZ, clampCam, wholeMap, zoomTo, hudInsets, OV_Z, TAP_ZOOM_Z, BUILDINGS, idx, MAP_W, MAP_H, TREE:TREE, STONE, GRASS, drawItem, drawBuildingIcon, save, load, switchSlot, get AC(){return AC;}, get MASTER(){return MASTER;}, unlockAudio, sfx, get silentEl(){return silentEl;}, IOS, deleteSlot, renameSlot, get META(){return META;}, slotData, slotKey, SAVE_KEY, META_KEY, offlineProgress, catchUp, welcomeBack, doRebirth, completeQuest, step: simulate, RECIPES, has, reserveOf, bundle, packTxt, rTxt, grant, itemKnown, deliver };
 Object.assign(window.AF, { respackItems, grantRespack, showRespackPop, factoryFlows, iapShopHTML, MEDALS, MEDAL_TIERS, MEDAL_N, MEDAL_EVERY, medalSync, medalEarned, medalTop, medalURL, drawMedal, openMedals, openMedalView, showMedalPop, medalCard, shareMedal, medalMarkSeen, medalNewList, medalUI, medalQ, medalPump, boostMul, boostOn, setBoostOn, boostOwned, forceBoost, grantBoost, iapComingSoon, iapProduct, IAP_PERM, IAP_INFO, ascendPts, rebirthPoints, xpNeedV4, itemXpBase, XP_ITEM_MUL, XP_GROW_V4, PACE_PROD });
 })();
