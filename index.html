@@ -9,12 +9,12 @@
 <meta name="apple-mobile-web-app-title" content="Beltopolis">
 <meta name="theme-color" content="#1b2433">
 <title>Beltopolis</title>
-<link rel="manifest" href="manifest.webmanifest?v=73b">
-<link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png?v=73b">
-<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png?v=73b">
-<link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png?v=73b">
-<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png?v=73b">
-<link rel="stylesheet" href="style.css?v=73b">
+<link rel="manifest" href="manifest.webmanifest?v=74">
+<link rel="apple-touch-icon" sizes="180x180" href="icons/icon-180.png?v=74">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png?v=74">
+<link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png?v=74">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png?v=74">
+<link rel="stylesheet" href="style.css?v=74">
 </head>
 <body>
 <canvas id="cv"></canvas>
@@ -31,7 +31,10 @@
     <span class="xp-lab" id="xpLab"></span>
   </button>
   <div id="quest" class="card"></div>
-  <div id="stock"></div>
+  <div id="stockWrap">
+    <div id="stock"></div>
+    <button type="button" id="aaToggle" class="aa-toggle on" aria-label="Toggle resource names" aria-pressed="true">Aa</button>
+  </div>
 </div>
 <div id="hint"></div>
 <div id="bottom">
@@ -66,6 +69,6 @@
 <div id="sheetWrap"><div id="sheet"></div></div>
 <div id="toast"></div>
 <div id="banner"></div>
-<script src="game.js?v=73b"></script>
+<script src="game.js?v=74"></script>
 </body>
 </html>

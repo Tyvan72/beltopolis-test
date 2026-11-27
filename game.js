@@ -103,6 +103,7 @@ const RECIPES = {
 // v70: belts merge into same-direction trunks (even from the side) and cross/turn under straight bridge decks, so crowded Hubs still connect; route-fail popup (Move Hub / Hub Extension); Hub Extension perk 5 ✦ (refund 95 ✦ once), unlimited placements; bridge items no longer vanish.
 // v71: faster first Ascension (quest bases 2.1/5.2/6.0, PACE_PROD 0.50, softer late-star quest scale); faster leveling (XP_GROW 1.12, 1.5× item XP) with a keep-your-level curve migrate; Ascend grants 10×★ ✦; Store removed from Rebirth; missing IAPs show Coming soon; permanent 2× Speed Boost IAP ($2.99) with on/off.
 // v73b: My Buildings removed from the Menu (the bottom-left Buildings button replaces it).
+// v74 (1.0.5): compact icon-only resource bar with a pinned Aa toggle (persisted, default on) and the current quest item first with a gold highlight; tapping the Hub opens a Flow Rates sheet with rolling 60s delivery rates, active items above Idle, and a 2-column scrollable grid.
 // v73 (1.0.5): bottom-left Buildings button opens My Buildings; gold Rebirth/Ascension pill moved to the quest card's top-right; My Buildings type rows open a compact docked tray (~32% height) listing every instance — tap a row to center it above the tray (Viewing highlight + map ring/label).
 // v72d: bigger quest-card era/progress text (16px era/progress, 20px quest title); building panel pins Upgrade + Max + Pause at the top; Menu Rate Beltopolis row (App Store write-review link) plus requestNativeReview hook after Ascension; My Buildings finder (crafters, megas, Hub only — not harvesters); Daily Challenges (3 goals, 1 PP each, local-midnight reset) and Weekly Event (era-scaled goal, exclusive belt color kept forever, auto-equip + toggle).
 // v68: Hub can no longer be placed on the map rim (edge margin + zoom-in before placing). Existing edge Hubs are moved on load. Players can Move the Hub from its info sheet.
@@ -2106,9 +2107,67 @@ function costOf(type, key){
 }
 const canPay = c => Object.keys(c).every(k => (S.stock[k]||0) >= c[k]);
 function pay(c){ for (const k in c) S.stock[k] -= c[k]; R.dirty = true; }
+const COMPACT_KEY = TEST_MODE ? 'autoforge_test_stockCompact' : 'autoforge_stockCompact';
+function stockCompact(){ return lsGet(COMPACT_KEY) !== '0'; } // default ON
+function applyStockCompact(){
+  const on = stockCompact();
+  const wrap = $('stockWrap'); if (wrap) wrap.classList.toggle('compact', on);
+  const btn = $('aaToggle');
+  if (btn){
+    btn.classList.toggle('on', on);
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.setAttribute('aria-label', on ? 'Show resource names' : 'Hide resource names');
+  }
+}
+function setStockCompact(on){ lsSet(COMPACT_KEY, on ? '1' : '0'); applyStockCompact(); try { updateUI(); } catch(e){} }
+function questItem(){ if (!S || S.finalDone) return null; try { const q = eraQuest(S.rebirths); return q && q.item; } catch(e){ return null; } }
+function resetHubFlow(){ R.hubFlow = {t0: performance.now(), ev:{}}; }
+function noteHubFlow(id, n){
+  if (!(n > 0) || !id) return;
+  const now = performance.now();
+  const hf = R.hubFlow || (R.hubFlow = {t0: now, ev:{}});
+  if (hf.t0 == null) hf.t0 = now;
+  const arr = hf.ev[id] || (hf.ev[id] = []);
+  arr.push({t:now, n:n});
+  const cut = now - 60000;
+  let i = 0; while (i < arr.length && arr[i].t < cut) i++;
+  if (i) arr.splice(0, i);
+}
+function hubFlowElapsed(){
+  const hf = R.hubFlow, now = performance.now();
+  if (!hf || hf.t0 == null) return 10;
+  return Math.min(60, Math.max(10, (now - hf.t0)/1000));
+}
+function hubFlowRate(id){
+  const now = performance.now(), hf = R.hubFlow; if (!hf) return 0;
+  const elapsed = hubFlowElapsed(), cut = now - elapsed*1000;
+  const arr = hf.ev[id] || [];
+  let sum = 0;
+  for (let i = arr.length-1; i >= 0; i--){ if (arr[i].t < cut) break; sum += arr[i].n; }
+  return sum / elapsed * 60;
+}
+function fmtFlow(n){
+  if (!(n > 0)) return '0/min';
+  const v = n >= 10 ? Math.round(n) : Math.round(n*10)/10;
+  return '+' + ((v % 1 === 0) ? String(v|0) : v.toFixed(1)) + '/min';
+}
+function hubKnownKeys(){
+  const q = questItem();
+  return Object.keys(ITEMS).filter(k => ITEMS[k] && (itemKnown(k) || (S.stock[k]||0) > 0 || (S.totalDelivered[k]||0) > 0 || k === q));
+}
+function hubFlowKeys(){
+  const q = questItem(), keys = hubKnownKeys(), rates = {};
+  for (const k of keys) rates[k] = hubFlowRate(k);
+  const qFirst = (a,b) => (a===q ? -1 : 0) - (b===q ? -1 : 0);
+  const active = keys.filter(k => rates[k] > 0).sort(qFirst);
+  const idle = keys.filter(k => !(rates[k] > 0)).sort(qFirst);
+  return {active, idle, rates, qItem:q};
+}
+
 function deliver(id, n, quiet, atB){
   quiet = quiet || R.quiet;
   addStock(id, n); S.totalDelivered[id] = (S.totalDelivered[id]||0)+n; if (S.stats) S.stats.del[id] = (S.stats.del[id]||0)+n;
+  if (!quiet && !R.loading) try { noteHubFlow(id, n); } catch(e){}
   try { gainXp(id, n); } catch(e){}
   try { noteChProgress('deliver', id, n); } catch(e){}
   const q = curQuest();
@@ -2601,6 +2660,8 @@ function load(){
   }
   if (S && S.hub){ cam.x = S.hub.x+1.5; cam.y = S.hub.y+1.5; } else { cam.x = MAP_W/2; cam.y = MAP_H/2; }
   cam.vx = cam.vy = 0; R.dirty = true;
+  try { resetHubFlow(); } catch(e){}
+  try { applyStockCompact(); } catch(e){}
   try { ensureEvents(); } catch(e){}
   if (needsEraNews()) offerEraNewsSoon();
 }
@@ -2862,6 +2923,7 @@ function openHubMovePlace(x, y){
 }
 
 function setupWorld(){
+  try { resetHubFlow(); } catch(e){}
   R.multi = null; if (typeof multiBar==='function' && mbar) multiBar();
   migrateMapCoords();
   if (S.terrGen == null) S.terrGen = TERR_GEN_LAND; // freeze pre-island saves on classic land
@@ -3438,7 +3500,7 @@ function hudInsets(){
   if (!R.ins || R.insW !== W || R.insH !== H || R.insTray !== tray){
     let t = 0, b = 0;
     try { const q = document.getElementById('quest'), st = document.getElementById('stock'), bo = document.getElementById('bottom');
-      t = Math.max(q && !DESK.on ? q.getBoundingClientRect().bottom : 0, st ? st.getBoundingClientRect().bottom : 0);
+      const sw = document.getElementById('stockWrap') || st; t = Math.max(q && !DESK.on ? q.getBoundingClientRect().bottom : 0, sw ? sw.getBoundingClientRect().bottom : 0);
       b = bo ? H - bo.getBoundingClientRect().top : 0;
       if (tray) b = Math.max(b, sheet.offsetHeight); } catch(e){}
     R.ins = [Math.max(0, Math.min(t, H*0.4)), Math.max(0, Math.min(b, H*(tray ? 0.45 : 0.3)))]; R.insW = W; R.insH = H; R.insTray = tray;
@@ -5411,7 +5473,7 @@ function ripple(x,y){ R.parts.push({x,y,vx:0,vy:0,life:.35,max:.35,col:'rgba(255
 // ============================== UI ==============================
 const $ = id => document.getElementById(id);
 const sheetWrap = $('sheetWrap'), sheet = $('sheet');
-function sheetScroller(){ return sheet.querySelector('.bld-body') || sheet; }
+function sheetScroller(){ return sheet.querySelector('.fr-body') || sheet.querySelector('.bld-body') || sheet; }
 function updateSheetMore(){
   if (!sheetWrap.classList.contains('open')){ sheet.classList.remove('sheet-more'); return; }
   const sc = sheetScroller();
@@ -5428,6 +5490,7 @@ function openSheet(html, onClose, opts){
   sheetWrap.classList.add('open');
   R.onClose = onClose;
   sheet.classList.toggle('has-bld-head', !!opts.pin);
+  sheet.classList.toggle('has-fr-head', !!opts.fr);
   sheetWrap.classList.toggle('tray', !!opts.tray); sheet.classList.toggle('mb-tray', !!opts.tray);
   if (!opts.tray){ R.mbTray = null; R.mbFocus = null; }
   R.ins = null;
@@ -5443,7 +5506,7 @@ function openSheet(html, onClose, opts){
   if (DESK.on) deskSync();
 }
 function navSel(id){ document.querySelectorAll('#bottom .nav').forEach(el => el.classList.toggle('sel', !!id && el.id===id)); }
-function closeSheet(){ navSel(null); sheetWrap.classList.remove('open','tray'); sheet.classList.remove('mb-tray'); R.mbTray = null; R.mbFocus = null; R.ins = null; R.dkTab = 'build'; if (DESK.on) deskSync(); sheet.classList.remove('sheet-more','has-bld-head'); R.sel = null; if (R.onClose){ const f=R.onClose; R.onClose=null; f(); } if (R.pendingDaily) offerDailySoon(); else if (R.pendingEraNews || needsEraNews()) offerEraNewsSoon(); }
+function closeSheet(){ navSel(null); sheetWrap.classList.remove('open','tray'); sheet.classList.remove('mb-tray'); R.mbTray = null; R.mbFocus = null; R.ins = null; R.dkTab = 'build'; if (DESK.on) deskSync(); sheet.classList.remove('sheet-more','has-bld-head','has-fr-head'); if (R.infoTimer){ clearInterval(R.infoTimer); R.infoTimer = null; } R.sel = null; if (R.onClose){ const f=R.onClose; R.onClose=null; f(); } if (R.pendingDaily) offerDailySoon(); else if (R.pendingEraNews || needsEraNews()) offerEraNewsSoon(); }
 // Tap the dimmed game band above the sheet to dismiss — never let that tap reach the canvas/build
 sheetWrap.addEventListener('pointerdown', e => {
   if (e.target !== sheetWrap) return;
@@ -5567,29 +5630,62 @@ function openInfo(b){
     return;
   }
   if (b.type==='hub'){
-    const hubSub = () => `${eraLabel(S.rebirths)} · ${eraName(S.rebirths)} · ${S.b.length} building${S.b.length===1?'':'s'} · ✦ ${S.pp}`;
-    const hubKeys = () => Object.keys(S.stock).filter(k=>S.stock[k]>0 && ITEMS[k]);
-    const cell = k => `<div data-k="${k}">${img(k)}<span class="hq">${fmt(S.stock[k]||0)}</span> ${ITEMS[k].name}</div>`;
-    const keys = hubKeys();
-    openSheet(`<h2>Main Hub</h2><div class="sub" id="hsub">${hubSub()}</div>
-      <div class="inv" id="hinv">${keys.length?keys.map(cell).join(''):'<div class="hempty">Empty</div>'}</div>
-      <div class="row" style="margin-top:10px"><button class="btn" data-a="mv">Move Hub</button><button class="btn" data-a="x">Done</button></div>`);
-    const mv = sheet.querySelector('[data-a=mv]'); if (mv) mv.onclick = () => { closeSheet(); startHubMove(); };
-    const done = sheet.querySelector('[data-a=x]'); if (done) done.onclick = closeSheet;
-    // live refresh in place (~4.5x/sec): update numbers, append newly arrived items; never rebuild or reset scroll
-    const tickHub = () => {
-      const sub = sheet.querySelector('#hsub'), inv = sheet.querySelector('#hinv'); if (!sub || !inv) return;
-      const t = hubSub(); if (sub.textContent !== t) sub.textContent = t;
-      for (const k of hubKeys()){
-        let el = inv.querySelector(`[data-k="${k}"]`);
-        if (!el){ const em = inv.querySelector('.hempty'); if (em) em.remove(); inv.insertAdjacentHTML('beforeend', cell(k)); el = inv.lastElementChild; el.classList.add('new'); setTimeout(()=>el.classList.remove('new'), 600); continue; }
-        const q = el.querySelector('.hq'), v = fmt(S.stock[k]||0);
-        if (q.textContent !== v){ const up = (S.stock[k]||0) > (+el.dataset.n||0); q.textContent = v; if (up){ el.classList.add('up'); clearTimeout(el._t); el._t = setTimeout(()=>el.classList.remove('up'), 350); } }
-        el.dataset.n = S.stock[k]||0;
-      }
-      inv.querySelectorAll('[data-k]').forEach(el => { const k = el.dataset.k; if (!(S.stock[k]>0)){ const q = el.querySelector('.hq'); if (q.textContent !== '0') q.textContent = '0'; el.dataset.n = 0; } });
+    const flowCell = (k, idle, rates, qItem) => {
+      const r = rates[k]||0;
+      return `<div class="fr-cell${idle?' idle':''}${k===qItem?' quest':''}" data-k="${k}" data-idle="${idle?1:0}">
+        ${img(k)}<span class="fr-tx"><b>${ITEMS[k].name}</b><small class="hq">${fmt(S.stock[k]||0)}</small></span>
+        <span class="fr-rate">${idle ? '0/min' : fmtFlow(r)}</span>
+      </div>`;
     };
-    clearInterval(R.infoTimer); R.infoTimer = setInterval(() => { if (!sheetWrap.classList.contains('open') || !R.sel || R.sel.b !== b || S.hub !== b) { clearInterval(R.infoTimer); return; } tickHub(); }, 220);
+    const flowHTML = (data) => {
+      const {active, idle, rates, qItem} = data;
+      let h = '';
+      if (!active.length) h += `<div class="fr-empty" id="frEmpty">Connect a belt to the Hub to see live flow rates.</div>`;
+      if (active.length) h += `<div class="fr-grid" id="frActive">${active.map(k => flowCell(k, false, rates, qItem)).join('')}</div>`;
+      if (idle.length) h += `<div class="fr-idle-lab">Idle (0/min)</div><div class="fr-grid idle" id="frIdle">${idle.map(k => flowCell(k, true, rates, qItem)).join('')}</div>`;
+      h += `<div class="row" style="margin-top:12px"><button class="btn" data-a="mv">Move Hub</button></div>`;
+      return h;
+    };
+    const sigOf = data => (data.qItem||'') + '|A:' + data.active.join(',') + '|I:' + data.idle.join(',');
+    const paintHubIco = () => {
+      const cv = sheet.querySelector('.fr-hubico'); if (!cv) return;
+      const dpr = Math.min(2, window.devicePixelRatio||1), s = 22;
+      cv.width = s*dpr; cv.height = s*dpr; cv.style.width = s+'px'; cv.style.height = s+'px';
+      const c = cv.getContext('2d'); c.setTransform(dpr,0,0,dpr,0,0); c.clearRect(0,0,s,s);
+      try { drawBuildingIcon(c, 'hub', s/2, s/2+1, s*0.95); } catch(e){}
+    };
+    const bindFlow = () => {
+      const mv = sheet.querySelector('[data-a=mv]'); if (mv) mv.onclick = () => { closeSheet(); startHubMove(); };
+      const done = sheet.querySelector('[data-a=x]'); if (done) done.onclick = closeSheet;
+    };
+    openSheet(`<div class="fr-head"><div class="mbt-head"><span class="fr-hub"><canvas class="fr-hubico" width="22" height="22" aria-hidden="true"></canvas> Hub</span><span class="mbt-pill">Flow Rates</span><button type="button" class="mbt-x" data-a="x" aria-label="Close">✕</button></div>
+      <div class="sub" id="hsub">Active production (last 60s)</div></div>
+      <div class="fr-body" id="hflow">${flowHTML(hubFlowKeys())}</div>`, null, {fr:true});
+    paintHubIco(); bindFlow();
+    const tickHub = () => {
+      const body = sheet.querySelector('#hflow'); if (!body) return;
+      const data = hubFlowKeys(), sig = sigOf(data);
+      if (body.dataset.sig !== sig){
+        const y = body.scrollTop;
+        body.dataset.sig = sig;
+        body.innerHTML = flowHTML(data);
+        body.scrollTop = y;
+        bindFlow();
+        return;
+      }
+      for (const el of body.querySelectorAll('[data-k]')){
+        const k = el.dataset.k, q = el.querySelector('.hq'), rateEl = el.querySelector('.fr-rate');
+        const v = fmt(S.stock[k]||0);
+        if (q && q.textContent !== v) q.textContent = v;
+        const want = el.dataset.idle==='1' ? '0/min' : fmtFlow(data.rates[k]||0);
+        if (rateEl && rateEl.textContent !== want) rateEl.textContent = want;
+      }
+    };
+    clearInterval(R.infoTimer);
+    R.infoTimer = setInterval(() => {
+      if (!sheetWrap.classList.contains('open') || !R.sel || R.sel.b !== b || S.hub !== b){ clearInterval(R.infoTimer); R.infoTimer = null; return; }
+      tickHub();
+    }, 1000);
     tickHub();
     return;
   }
@@ -6519,6 +6615,7 @@ function openMenu(){
     <button class="opt achbtn cosbtn" data-a="cos"><span class="ach-ic">🎨</span><span class="ob"><b>Style Shop</b><small>Spend ✦ on looks · belts, buildings, maps, trails & landmarks · Lv ${S.level||1}</small></span><span class="chev">›</span></button>
     ${IAP.native ? `<button class="opt achbtn" data-a="restore"><span class="ach-ic">🛍️</span><span class="ob"><b>Restore Purchases</b><small>${[IAP.owned('asc')&&'Ascension Pass ✓',IAP.owned('boost')&&'Speed Boost ✓'].filter(Boolean).join(' · ')||'Get back your purchases on this device'}</small></span><span class="chev">›</span></button>` : ''}
     ${S.hub ? `<button class="opt achbtn" data-a="mvhub"><span class="ach-ic">🏠</span><span class="ob"><b>Move Hub</b><small>Pick it up and place it on a new open spot</small></span><span class="chev">›</span></button>` : ''}
+    <button class="opt achbtn" data-a="compact"><span class="ach-ic">Aa</span><span class="ob"><b>Compact resource bar</b><small>${stockCompact()?'Names hidden — more items fit on the bar':'Show icons and numbers only'}</small></span><span class="chev">${stockCompact()?'On':'Off'}</span></button>
     <button class="opt achbtn" data-a="photo"><span class="ach-ic">📷</span><span class="ob"><b>Photo Mode</b><small>Hide the UI and share a picture of your factory</small></span><span class="chev">›</span></button>
     <div class="world-tag">${world().ic} <b>${world().name}</b><small>${S.terrGen===TERR_GEN_ISLANDS?'Archipelago · belts bridge water':'Ascension world · look only'}</small></div><h3 class="sl-h">Saves</h3><div id="slots">${slotCards()}</div>
     ${boostOwned() ? `<button class="opt achbtn" data-a="boost"><span class="ach-ic">⚡</span><span class="ob"><b>Speed Boost</b><small>${boostOn()?'On · factory runs at 2× — tap to turn off':'Off · tap to run your factory at 2×'}</small></span><span class="chev">${boostOn()?'On':'Off'}</span></button>` : ''}
@@ -6538,6 +6635,7 @@ function openMenu(){
   sheet.querySelector('[data-a=cos]').onclick = () => { sfx('click'); openCosmetics(); };
   const rsp = sheet.querySelector('[data-a=restore]'); if (rsp) rsp.onclick = async () => { sfx('click'); await iapRestore(); if (sheetWrap.classList.contains('open')) openMenu(); };
   const mvh = sheet.querySelector('[data-a=mvhub]'); if (mvh) mvh.onclick = () => { sfx('click'); closeSheet(); startHubMove(); };
+  const cpt = sheet.querySelector('[data-a=compact]'); if (cpt) cpt.onclick = () => { sfx('click'); setStockCompact(!stockCompact()); openMenu(); };
   const ph = sheet.querySelector('[data-a=photo]'); if (ph) ph.onclick = () => { sfx('click'); closeSheet(); enterPhotoMode(); };
   sheet.querySelector('[data-a=x]').onclick = closeSheet;
   sheet.querySelector('[data-a=snd]').onclick = () => { S.sound = !S.sound; if (S.sound){ unlockAudio(); setTimeout(()=>sfx('collect'), 60); } else { audioSession(false); if (AC) AC.suspend().catch(()=>{}); } save(); openMenu(); };
@@ -6587,6 +6685,8 @@ function rbToast(){ toast(S.rebirths || ascN() ? `${ascN()?'Ascension ★'+ascN(
 if ($('bBld')) $('bBld').onclick = () => { sfx('click'); if (sheetWrap.classList.contains('open') && (R.mbFrom==='bld') && (R.mbTray || sheet.querySelector('.mb-list'))){ closeSheet(); return; } openMyBuildings('bld'); };
 $('bPerk').onclick = () => { sfx('click'); openPerks(); }; $('quest').onclick = e => { sfx('click'); if (e && e.target && e.target.closest && e.target.closest('.qrb')){ e.stopPropagation(); rbToast(); return; } if (S.finalDone) openPerks(); else { const q = eraQuest(S.rebirths); openRecipeTree(q.item); } }; if ($('bMap')) $('bMap').onclick = () => { sfx('click'); closeSheet(); if (cam.z > fitZ()*1.25){ R.prevView = {x:cam.x, y:cam.y, z:cam.z}; wholeMap(); navSel('bMap'); } else { const v = R.prevView || (S.hub ? {x:S.hub.x+1.5, y:S.hub.y+1.5, z:44} : {x:MAP_W/2, y:MAP_H/2, z:44}); zoomTo(v.x, v.y, Math.max(30, v.z)); navSel(null); } };
 $('bMenu').onclick = () => { sfx('click'); openMenu(); };
+if ($('aaToggle')) $('aaToggle').onclick = ev => { ev.preventDefault(); ev.stopPropagation(); sfx('click'); setStockCompact(!stockCompact()); };
+applyStockCompact();
 function goToHub(){
   closeSheet();
   if (!S || !S.hub){ toast('Place your Main Hub first', 2200); return false; }
@@ -6765,12 +6865,16 @@ function updateUI(){
     const qh = `<div class="qi" style="font-size:26px">🌟</div><div class="qb"><div class="qt">${rbPillHTML()}${eraLabel(S.rebirths)} complete!</div><div class="qn">Tap here to Rebirth (+1 ✦)</div><div class="qr">Next: ${eraName(S.rebirths+1)} · ${eraReveal(S.rebirths+1).text}</div></div>`;
     if (qe.dataset.h !== qh){ qe.dataset.h = qh; qe.innerHTML = qh; qe.classList.add('ready'); }
   }
-  const keys = Object.keys(ITEMS).filter(k => (S.stock[k]||0) > 0 || (S.totalDelivered[k]||0) > 0);
-  const st = $('stock'), sig = keys.join(',');
-  if (st.dataset.sig !== sig){ st.dataset.sig = sig; st.innerHTML = keys.map(k => `<div class="chip" data-k="${k}">${img(k)}<span class="cq">${fmt(S.stock[k]||0)}</span><span class="cn">${ITEMS[k].name}</span></div>`).join(''); }
-  else for (const ch of st.children){ const k = ch.dataset.k, v = fmt(S.stock[k]||0), q = ch.firstElementChild.nextElementSibling;
-    if (q.textContent !== v){ q.textContent = v; if (lastStock[k]!==undefined && (S.stock[k]||0) > lastStock[k]){ ch.classList.remove('bump'); void ch.offsetWidth; ch.classList.add('bump'); } } }
+  const qItem = questItem();
+  const keys = Object.keys(ITEMS).filter(k => (S.stock[k]||0) > 0 || (S.totalDelivered[k]||0) > 0 || k === qItem);
+  if (qItem){ const i = keys.indexOf(qItem); if (i > 0){ keys.splice(i,1); keys.unshift(qItem); } }
+  const st = $('stock'), compact = stockCompact(), sig = (compact?'c':'f') + ',' + (qItem||'') + ',' + keys.join(',');
+  if (st.dataset.sig !== sig){ st.dataset.sig = sig; st.innerHTML = keys.map(k => `<div class="chip${k===qItem?' quest':''}" data-k="${k}">${img(k)}<span class="cq">${fmt(S.stock[k]||0)}</span><span class="cn">${ITEMS[k].name}</span></div>`).join(''); }
+  else for (const ch of st.children){ const k = ch.dataset.k, v = fmt(S.stock[k]||0), q = ch.querySelector('.cq') || ch.firstElementChild.nextElementSibling;
+    if (q && q.textContent !== v){ q.textContent = v; if (lastStock[k]!==undefined && (S.stock[k]||0) > lastStock[k]){ ch.classList.remove('bump'); void ch.offsetWidth; ch.classList.add('bump'); } }
+    ch.classList.toggle('quest', k===qItem); }
   lastStock = {...S.stock};
+  applyStockCompact();
   $('bPerk').classList.toggle('glow', !!S.finalDone);
   { const pp = S.pp||0, bd = $('ppBadge'), canBuy = PERKS.some(p => perk(p.id) < p.max && pp >= perkCost(p.id)); const t = pp ? '✦'+pp : '';
     if (bd.textContent !== t) bd.textContent = t; bd.classList.toggle('show', pp > 0); $('bPerk').classList.toggle('has', canBuy && !S.finalDone); }
@@ -8103,6 +8207,6 @@ setInterval(save, 5000);
 if ('serviceWorker' in navigator && location.protocol==='https:') navigator.serviceWorker.register('sw.js').catch(()=>{});
 requestAnimationFrame(t => { lastT = t; requestAnimationFrame(frame); });
 // test hooks
-window.AF = { DESK, deskSync, closeSheet, openMenu, openStore, openCosmetics, openReviewPage, requestNativeReview, REVIEW_URL, isFindableBuilding, openMyBuildings, openMyBuildingsType, mbFocus, mbFocusTarget, mbFindUid, rbToast, goToBuilt, buildingsByType, showFindToast, ensureEvents, ensureDailyChallenges, ensureWeekEvent, noteChProgress, claimChallenge, claimWeekEvent, openDailyChallenges, openWeeklyEvent, dailyChCounts, weekStartKey, clockDate, fmtRemain, WEEK_BELTS, IAP, IAP_IDS, iapInit, iapHandleTx, iapBuy, iapRestore, openIapScreen, applyRespec, perkSpent, ascGated, BUILD_ORDER, HUT_WALK, HUT_CHOP, HUT_REACH, HUT_HITS, HUT_PAYOUT, isHut, hutTv, hutItem, hutCenter, hutFindTarget, hutDoHit, hutWearLeft, stepHut, flowHut, hutReach, hutDismiss, hutRelink, hutCrewN, hutWalkSp, hutChopT, hutUpgCost, hutBuyUpg, openHutInfo, hutsOf, goToHut, goToHub, updateHutLocators, HUT_LOC_Z, BUILDING_OUTLINE, BUILDING_OUTLINE_COLOR, buildingOutlineW, strokeBuildingOutline, craftRate, harvTvOf, repairHarvesterTerrain, migrateMapCoords, migrateHubFromEdge, moveHubTo, findHubSafeSpot, startHubMove, cancelHubMove, endHubMove, openHubMovePlace, hubFits, hubEdgePad, hubEdgeErr, clampHubPlace, HUB_EDGE, lvSpeed, lvDouble, lvCost, migrateBuildingLv, MAX_LV, harvestItem, harvestMul, craftMul, beltSpeed, perkSpeed, paceQuest, PERKS, perkCost, megaUnlocked, openRecipeBook, openRecipeTree, crafterOf, updateUI, WORLDS, world, worldOf, worldIdx, worldName, worldPreview, applyWorldFrame, mixHex, setWorld(i){ R.forceWorld = i==null?null:(i%WORLDS.length); if (R.terr) renderTerrain(); else applyWorldFrame(); R.dirty=true; }, trackDay, cosOn, ACH, checkAch, openAch, openDaily, claimDaily, dailyState, maybeDaily, offerDailySoon, isWoodCutter, cutterBelted, firstCutterConnected, dailyIntroReady, spinSlices, startSpin, pickSpin, prizeGrant, today, dayGap, prodMul, goldHub, retainInit, DAILY, gainXp, itemXp, xpNeed, xpNeedV3, xpPpAt, xpNextPp, XP_BASE, XP_GROW, XP_PP_EVERY, XP_CURVE_V, migrateXpReset, migrateAllSlotsXp, BASE_ERAS, MAX_ERAS, BASE_LAST, cycleLen, capOf, lastEraOf, migrateEraCap, POST_ERAS, POST_ART, applyPostQuantum, drawPauseBadge, pauseBadgeAt, pauseBadgeLayout, resumeFromBadge, COSMETICS, COS_BY_ID, MAP_PALETTES, beltSkin, beltPalette, skinHex, applyMapTheme, paintBuildCosmetic, rainbowHex, cosOwned, cosEq, buyCosmetic, equipCosmetic, openCosmetics, updateXpBar, celebrateLevel, flushLevelUp, xpLive, TEST_MODE, TEST_PP, testPPAmount, bootTestSandbox, refreshSandboxBadge, sandboxBadgeText, harvKeyOf, costOf, canPay, goldBonusLine, megaBlurb, bKey, drillOreTv, isLandType, isLandB, LAND_ORDER, LAND_OLD_SIZE, startLandmarkPlace, finishLandmarkTap, snapshotLandmarks, restoreLandmarks, migrateLandmarkScale, landFitErr, enterPhotoMode, exitPhotoMode, captureFactoryPhoto, shareFactoryPhoto, takeFactoryPhoto, showPhotoPreview, sharePhotoFromPreview, sharePreparedPhoto, closePhotoPreview, photoLooksValid, photoShareFile, formSetId, formKind, drawFormBuilding, drawFormIcon, formSetIcon, HUT_PLACE_MAX, isHutType, hutPlaced, hutSlotsLeft, hutAtCap, placeCheck, footprint, openBuildMenu, build, demolish, doRebirth, MAP_W, MAP_H, GRASS, TREE, STONE, IRON, SILVER, get terr(){return R.terr;}, get cam(){return cam;}, get bridges(){return R.bridges;}, recountBelts, routeBuilding, routeBuildingSafe, pickRoute, unroute, routeAllBuildings, beltConflicts, beltBlocked, needsBelt, celebrateAscension, eraUnlockOf, eraUnlockHTML, needsEraNews, markEraNews, maybeEraNews, showEraNewsCatchup, isGoldB, isGoldKey, ASC_ORDER, ASC_SPEED, ivOf, pickAt, get W(){return W;}, get H(){return H;}, get S(){return S;}, get multi(){return R.multi;}, openBulk, selectAllOfType, planNext, planTo, planTotal, affordable, removeRefund, exitMulti, toggleMulti, clearTile, clearCheck, CLEAR_YIELD, openBuildMenu, dblCost, DBL_CHANCE, tierCost, tierMul, openInfo, findRoute, placeCheck, setRecipe, costOf, canPay, bKey, nBuilt, recountBuilt, growthMul, reset(seed, era){ S = era ? freshState({rebirths:era, pp:0, perks:{}, sound:S.sound, ...retainKeep(S)}) : freshState(); if (seed) S.seed = seed; setupWorld(); R.dirty = true; R.pendingDaily = !!dailyState(); }, R, cam, build, tap, toWorld, toScreen, ERAS, eraQuest, eraUnlocks, eraReveal, eraName, eraLabel, doRebirth, celebrate, openPerks, RES, RES_BY_KEY, ORE_T, ITEMS, gotoEra(e, pp, seed, asc){ S = freshState({rebirths:e, asc: asc===undefined ? S.asc|0 : asc, pp:pp||0, perks:S.perks, sound:S.sound, ...retainKeep(S)}); if (seed) S.seed = seed; setupWorld(); cam.x = MAP_W/2; cam.y = MAP_H/2; R.dirty = true; }, migrateFishRemoval, migrateHutRemoval, migrateSurveyRemoval, migrateOuterResources, paintOuterResources, isIslandAsc, terrGenForAsc, islandGen, islandLayoutId, islandThemeId, islandLook, ISLAND_THEME, repairIslandResources, genIslandMapLegacy, TERR_GEN_LAND, TERR_GEN_ISLANDS, genMap, genIslandMap, spinStreakInfo, spinItemAmount, spinPrizeItems, jackpotSlice, SPIN_PP_FRAC, SPIN_JACK_FRAC, fitZ, clampCam, wholeMap, zoomTo, hudInsets, OV_Z, TAP_ZOOM_Z, BUILDINGS, idx, MAP_W, MAP_H, TREE:TREE, STONE, GRASS, drawItem, drawBuildingIcon, save, load, switchSlot, get AC(){return AC;}, get MASTER(){return MASTER;}, unlockAudio, sfx, get silentEl(){return silentEl;}, IOS, deleteSlot, renameSlot, get META(){return META;}, slotData, slotKey, SAVE_KEY, META_KEY, offlineProgress, catchUp, welcomeBack, doRebirth, completeQuest, step: simulate, RECIPES, has, reserveOf, bundle, packTxt, rTxt, grant, itemKnown, deliver };
+window.AF = { DESK, deskSync, closeSheet, openMenu, openStore, openCosmetics, openReviewPage, requestNativeReview, REVIEW_URL, isFindableBuilding, openMyBuildings, openMyBuildingsType, mbFocus, mbFocusTarget, mbFindUid, rbToast, goToBuilt, buildingsByType, showFindToast, ensureEvents, ensureDailyChallenges, ensureWeekEvent, noteChProgress, claimChallenge, claimWeekEvent, openDailyChallenges, openWeeklyEvent, dailyChCounts, weekStartKey, clockDate, fmtRemain, WEEK_BELTS, IAP, IAP_IDS, iapInit, iapHandleTx, iapBuy, iapRestore, openIapScreen, applyRespec, perkSpent, ascGated, BUILD_ORDER, HUT_WALK, HUT_CHOP, HUT_REACH, HUT_HITS, HUT_PAYOUT, isHut, hutTv, hutItem, hutCenter, hutFindTarget, hutDoHit, hutWearLeft, stepHut, flowHut, hutReach, hutDismiss, hutRelink, hutCrewN, hutWalkSp, hutChopT, hutUpgCost, hutBuyUpg, openHutInfo, hutsOf, goToHut, goToHub, updateHutLocators, HUT_LOC_Z, BUILDING_OUTLINE, BUILDING_OUTLINE_COLOR, buildingOutlineW, strokeBuildingOutline, craftRate, harvTvOf, repairHarvesterTerrain, migrateMapCoords, migrateHubFromEdge, moveHubTo, findHubSafeSpot, startHubMove, cancelHubMove, endHubMove, openHubMovePlace, hubFits, hubEdgePad, hubEdgeErr, clampHubPlace, HUB_EDGE, lvSpeed, lvDouble, lvCost, migrateBuildingLv, MAX_LV, harvestItem, harvestMul, craftMul, beltSpeed, perkSpeed, paceQuest, PERKS, perkCost, megaUnlocked, openRecipeBook, openRecipeTree, crafterOf, updateUI, stockCompact, setStockCompact, applyStockCompact, resetHubFlow, noteHubFlow, hubFlowRate, hubFlowKeys, fmtFlow, questItem, WORLDS, world, worldOf, worldIdx, worldName, worldPreview, applyWorldFrame, mixHex, setWorld(i){ R.forceWorld = i==null?null:(i%WORLDS.length); if (R.terr) renderTerrain(); else applyWorldFrame(); R.dirty=true; }, trackDay, cosOn, ACH, checkAch, openAch, openDaily, claimDaily, dailyState, maybeDaily, offerDailySoon, isWoodCutter, cutterBelted, firstCutterConnected, dailyIntroReady, spinSlices, startSpin, pickSpin, prizeGrant, today, dayGap, prodMul, goldHub, retainInit, DAILY, gainXp, itemXp, xpNeed, xpNeedV3, xpPpAt, xpNextPp, XP_BASE, XP_GROW, XP_PP_EVERY, XP_CURVE_V, migrateXpReset, migrateAllSlotsXp, BASE_ERAS, MAX_ERAS, BASE_LAST, cycleLen, capOf, lastEraOf, migrateEraCap, POST_ERAS, POST_ART, applyPostQuantum, drawPauseBadge, pauseBadgeAt, pauseBadgeLayout, resumeFromBadge, COSMETICS, COS_BY_ID, MAP_PALETTES, beltSkin, beltPalette, skinHex, applyMapTheme, paintBuildCosmetic, rainbowHex, cosOwned, cosEq, buyCosmetic, equipCosmetic, openCosmetics, updateXpBar, celebrateLevel, flushLevelUp, xpLive, TEST_MODE, TEST_PP, testPPAmount, bootTestSandbox, refreshSandboxBadge, sandboxBadgeText, harvKeyOf, costOf, canPay, goldBonusLine, megaBlurb, bKey, drillOreTv, isLandType, isLandB, LAND_ORDER, LAND_OLD_SIZE, startLandmarkPlace, finishLandmarkTap, snapshotLandmarks, restoreLandmarks, migrateLandmarkScale, landFitErr, enterPhotoMode, exitPhotoMode, captureFactoryPhoto, shareFactoryPhoto, takeFactoryPhoto, showPhotoPreview, sharePhotoFromPreview, sharePreparedPhoto, closePhotoPreview, photoLooksValid, photoShareFile, formSetId, formKind, drawFormBuilding, drawFormIcon, formSetIcon, HUT_PLACE_MAX, isHutType, hutPlaced, hutSlotsLeft, hutAtCap, placeCheck, footprint, openBuildMenu, build, demolish, doRebirth, MAP_W, MAP_H, GRASS, TREE, STONE, IRON, SILVER, get terr(){return R.terr;}, get cam(){return cam;}, get bridges(){return R.bridges;}, recountBelts, routeBuilding, routeBuildingSafe, pickRoute, unroute, routeAllBuildings, beltConflicts, beltBlocked, needsBelt, celebrateAscension, eraUnlockOf, eraUnlockHTML, needsEraNews, markEraNews, maybeEraNews, showEraNewsCatchup, isGoldB, isGoldKey, ASC_ORDER, ASC_SPEED, ivOf, pickAt, get W(){return W;}, get H(){return H;}, get S(){return S;}, get multi(){return R.multi;}, openBulk, selectAllOfType, planNext, planTo, planTotal, affordable, removeRefund, exitMulti, toggleMulti, clearTile, clearCheck, CLEAR_YIELD, openBuildMenu, dblCost, DBL_CHANCE, tierCost, tierMul, openInfo, findRoute, placeCheck, setRecipe, costOf, canPay, bKey, nBuilt, recountBuilt, growthMul, reset(seed, era){ S = era ? freshState({rebirths:era, pp:0, perks:{}, sound:S.sound, ...retainKeep(S)}) : freshState(); if (seed) S.seed = seed; setupWorld(); R.dirty = true; R.pendingDaily = !!dailyState(); }, R, cam, build, tap, toWorld, toScreen, ERAS, eraQuest, eraUnlocks, eraReveal, eraName, eraLabel, doRebirth, celebrate, openPerks, RES, RES_BY_KEY, ORE_T, ITEMS, gotoEra(e, pp, seed, asc){ S = freshState({rebirths:e, asc: asc===undefined ? S.asc|0 : asc, pp:pp||0, perks:S.perks, sound:S.sound, ...retainKeep(S)}); if (seed) S.seed = seed; setupWorld(); cam.x = MAP_W/2; cam.y = MAP_H/2; R.dirty = true; }, migrateFishRemoval, migrateHutRemoval, migrateSurveyRemoval, migrateOuterResources, paintOuterResources, isIslandAsc, terrGenForAsc, islandGen, islandLayoutId, islandThemeId, islandLook, ISLAND_THEME, repairIslandResources, genIslandMapLegacy, TERR_GEN_LAND, TERR_GEN_ISLANDS, genMap, genIslandMap, spinStreakInfo, spinItemAmount, spinPrizeItems, jackpotSlice, SPIN_PP_FRAC, SPIN_JACK_FRAC, fitZ, clampCam, wholeMap, zoomTo, hudInsets, OV_Z, TAP_ZOOM_Z, BUILDINGS, idx, MAP_W, MAP_H, TREE:TREE, STONE, GRASS, drawItem, drawBuildingIcon, save, load, switchSlot, get AC(){return AC;}, get MASTER(){return MASTER;}, unlockAudio, sfx, get silentEl(){return silentEl;}, IOS, deleteSlot, renameSlot, get META(){return META;}, slotData, slotKey, SAVE_KEY, META_KEY, offlineProgress, catchUp, welcomeBack, doRebirth, completeQuest, step: simulate, RECIPES, has, reserveOf, bundle, packTxt, rTxt, grant, itemKnown, deliver };
 Object.assign(window.AF, { respackItems, grantRespack, showRespackPop, factoryFlows, iapShopHTML, MEDALS, MEDAL_TIERS, MEDAL_N, MEDAL_EVERY, medalSync, medalEarned, medalTop, medalURL, drawMedal, openMedals, openMedalView, showMedalPop, medalCard, shareMedal, medalMarkSeen, medalNewList, medalUI, medalQ, medalPump, boostMul, boostOn, setBoostOn, boostOwned, forceBoost, grantBoost, iapComingSoon, iapProduct, IAP_PERM, IAP_INFO, ascendPts, rebirthPoints, xpNeedV4, itemXpBase, XP_ITEM_MUL, XP_GROW_V4, PACE_PROD });
 })();
