@@ -1175,3 +1175,29 @@ html:not(.desk) #sheet.sk-full{max-height:88%}
 html.desk .dk-tabs{grid-template-columns:repeat(6,1fr);gap:4px}
 html.desk .dk-tab{font-size:10.5px}
 html.desk .sk-grid{max-width:420px;margin:0 auto}
+
+/* ---- v3: 4 branches x 5 nodes, row layout, rising costs ---- */
+.sk-tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:2px 0 8px}
+.sk-tab{border:0;border-radius:14px;background:#f1eefb;color:#2d2350;padding:6px 2px 5px;font:inherit;display:flex;flex-direction:column;align-items:center;gap:1px;min-height:60px;-webkit-tap-highlight-color:transparent}
+.sk-tab span{font-size:20px;line-height:22px}.sk-tab b{font-size:11.5px}.sk-tab small{font-size:11px;font-weight:800;color:var(--sk)}
+.sk-tab.on{background:var(--sk);color:#fff;box-shadow:0 3px 10px rgba(80,40,160,.3)}.sk-tab.on small{color:#fff}
+.sk-dot2{display:inline-block;width:8px;height:8px;border-radius:50%;background:#ffd23f;margin-left:2px;vertical-align:middle;text-decoration:none}
+.sk-cost{font-style:normal;font-size:12px;font-weight:900;color:var(--sk);background:#f1eaff;border-radius:9px;padding:1px 7px;margin-left:4px;white-space:nowrap}
+.sk-list{display:flex;flex-direction:column}
+.sk-row{display:flex;align-items:stretch;gap:10px;width:100%;border:0;background:none;padding:0 2px;text-align:left;font:inherit;color:#2d2350;-webkit-tap-highlight-color:transparent;min-height:72px}
+.sk-rc{flex:none;width:62px;display:flex;flex-direction:column;align-items:center;padding-top:4px}
+.sk-row .sk-ln{flex:1;width:5px;min-height:10px;margin:2px 0}
+.sk-rt{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;padding:4px 0 8px}
+.sk-rt b{font-size:14.5px}.sk-rt small{font-size:12px;color:#6a6585;line-height:1.25;margin-top:1px}
+.sk-pr{flex:none;align-self:center;font-style:normal;font-size:14px;font-weight:900;color:var(--sk);min-width:50px;text-align:right}
+.sk-row.st-own .sk-pr{color:var(--sk)}.sk-row.st-lock .sk-pr,.sk-row.st-need .sk-pr{color:#8a85a0}
+.sk-row.st-lock .sk-rt{opacity:.55}
+.sk-row.key .sk-c{width:62px;height:62px;border-radius:22px}
+.sk-row.sel .sk-rt b{text-decoration:underline;text-decoration-color:var(--sk);text-decoration-thickness:3px}
+.sk-row.sel .sk-c{outline:3px solid #2d2350;outline-offset:3px}
+.sk-row.pop .sk-c{animation:skPop .5s ease-out}
+.sk-row.st-can .sk-c{border-color:var(--sk);box-shadow:0 0 0 4px rgba(142,92,240,.25),0 2px 8px rgba(40,20,90,.2);animation:skPulse 1.6s ease-in-out infinite}
+.sk-row.st-own .sk-c{background:var(--sk);border-color:var(--sk)}
+.sk-row.st-need .sk-c{border-color:var(--sk);border-style:dashed}
+.sk-row.st-lock .sk-c{background:#eeedf3;opacity:.55;filter:grayscale(1)}
+.sk-row .sk-c{width:54px;height:54px}

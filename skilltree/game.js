@@ -539,7 +539,7 @@ const MAX_LV = 5;
 const LV_COL = [null,'#b2bec3','#55efc4','#74b9ff','#a29bfe','#fdcb6e'];
 const lvSpeed = lv => 1 + 0.25*Math.max(0, (lv||1)-1);           // 1.00 / 1.25 / 1.50 / 1.75 / 2.00
 const lvDouble = lv => 0.10*Math.max(0, (lv||1)-1);               // 0% / 10% / 20% / 30% / 40%
-const dblChance = b => lvDouble(b.lv||1) + 0.05*perk('lucky') + 0.10*perk('fortune') + 0.05*sk('t_p3');
+const dblChance = b => lvDouble(b.lv||1) + 0.05*perk('lucky') + 0.10*perk('fortune') + skf('dbl');
 // Cost to buy `lv` (from lv-1). Scaled to the building's own base build cost — affordable, not free.
 const LV_MUL = [0, 0, 1.5, 3, 5.5, 8]; // Lv2 ~1.5× build, Lv5 ~8× build
 function lvBaseCost(type){
@@ -598,54 +598,91 @@ const PERKS = [
 ];
 // ===== ASCENSION SKILL TREE (prototype) =====
 // Separate from prestige ✦ perks. Currency = Skill Points: exactly 1 per Ascension (so everyone's total = their Ascension count,
-// retroactive for old saves). 3 branches x 5 nodes (4 small + 1 keystone), bought in order, every node costs 1 skill point.
-// Nodes live in S.perks._sk = {n:{nodeId:1}, bonus:testPoints} so they carry through every rebirth/ascension automatically.
-const SKILL_BR = [
-  {id:'prod', ic:'⚙️', name:'Production', nodes:[
-    {id:'t_p1', ic:'⛏️', name:'Swift Harvest',  desc:'Harvesters work 5% faster'},
-    {id:'t_p2', ic:'🔨', name:'Master Crafter', desc:'Workshops & smelters work 5% faster'},
-    {id:'t_p3', ic:'🍀', name:'Lucky Factory',  desc:'+5% chance of double output on every building'},
-    {id:'t_p4', ic:'🔧', name:'Tune-Up',        desc:'Harvesters and crafters work 5% faster'},
-    {id:'t_p5', ic:'🏭', name:'Overdrive',      desc:'KEYSTONE: harvesters and crafters work 20% faster', key:1}]},
-  {id:'logi', ic:'🚚', name:'Logistics', nodes:[
-    {id:'t_l1', ic:'⚡', name:'Fast Belts',      desc:'Belts move items 5% faster'},
-    {id:'t_l2', ic:'🏗️', name:'Thrifty Builder', desc:'Buildings cost 5% less'},
-    {id:'t_l3', ic:'🌉', name:'Faster Belts',    desc:'Belts move items 5% faster'},
-    {id:'t_l4', ic:'🎒', name:'Head Start',      desc:'Every new era starts with extra Wood, Stone, Planks & Bricks'},
-    {id:'t_l5', ic:'🚄', name:'Express Lines',   desc:'KEYSTONE: belts move items 25% faster', key:1}]},
-  {id:'eco', ic:'💰', name:'Economy', nodes:[
-    {id:'t_e1', ic:'🪨', name:'Tile Cleaner',   desc:'+1 resource from every tile you clear'},
-    {id:'t_e2', ic:'🌙', name:'Night Shift',    desc:'+6 hours of offline time (base 24h)'},
-    {id:'t_e3', ic:'🎡', name:'Lucky Wheel',    desc:'Daily wheel item prizes are 10% bigger'},
-    {id:'t_e4', ic:'💤', name:'Deep Sleep',     desc:'+5% offline earnings'},
-    {id:'t_e5', ic:'🏦', name:'Tycoon',         desc:'KEYSTONE: clearing +2 more, wheel prizes +25%, offline earnings +10%', key:1}]},
+// retroactive for old saves). 4 branches x 5 nodes bought in order; node 1 costs 1, then 2, 3, 4 and the keystone costs 5 (60 total).
+// Nodes live in S.perks._sk = {n:{nodeId:1}, v, bonus, saved} so they carry through every rebirth/ascension automatically.
+const SK_DEF = [
+  {id:'prod', pre:'p', ic:'⚙️', name:'Production', nodes:[
+    ['⛏️','Swift Harvest',  {harv:.08}],
+    ['🔨','Master Crafter', {craft:.08}],
+    ['🍀','Lucky Factory',  {dbl:.04}],
+    ['🔧','Tune-Up',        {harv:.06, craft:.06}],
+    ['🏭','Overdrive',      {harv:.15, craft:.15}, 1]]},
+  {id:'logi', pre:'l', ic:'🚚', name:'Logistics', nodes:[
+    ['⚡','Fast Belts',      {belt:.08}],
+    ['🏗️','Thrifty Builder', {thr:.06}],
+    ['🎒','Head Start',      {hs:1}],
+    ['🌉','Faster Belts',    {belt:.08}],
+    ['🚄','Express Lines',   {belt:.20, thr:.06}, 1]]},
+  {id:'eco', pre:'e', ic:'💰', name:'Economy', nodes:[
+    ['🪨','Tile Cleaner',    {clear:1}],
+    ['🌙','Night Shift',     {off:6}],
+    ['🎡','Lucky Wheel',     {wheel:.15}],
+    ['💤','Deep Sleep',      {offm:.10}],
+    ['🏦','Tycoon',          {clear:1, wheel:.25, offm:.15}, 1]]},
+  {id:'pres', pre:'r', ic:'✦', name:'Prestige', nodes:[
+    ['🏷️','Haggler',         {disc:.05}],
+    ['🎫','Coupon',          {disc:.05}],
+    ['🧾','Bulk Buyer',      {disc:.07}],
+    ['💳','Loyalty Card',    {disc:.08}],
+    ['🤝','Bargain Hunter',  {disc:.15}, 1]]},
 ];
-SKILL_BR.forEach(br => br.nodes.forEach((n,i) => { n.br = br.id; n.i = i; }));
+const SK_COSTS = [1,2,3,4,5];
+const pcT = v => Math.round(v*100) + '%';
+function skFxText(fx){
+  const o = [];
+  if (fx.harv && fx.craft && fx.harv === fx.craft) o.push(`Harvesters & crafters work ${pcT(fx.harv)} faster`);
+  else { if (fx.harv) o.push(`Harvesters work ${pcT(fx.harv)} faster`); if (fx.craft) o.push(`Crafters work ${pcT(fx.craft)} faster`); }
+  if (fx.dbl) o.push(`+${pcT(fx.dbl)} double-output chance on every building`);
+  if (fx.belt) o.push(`Belts move ${pcT(fx.belt)} faster`);
+  if (fx.thr) o.push(`Buildings cost ${pcT(fx.thr)} less`);
+  if (fx.hs) o.push('Every new era starts with extra Wood, Stone, Planks & Bricks');
+  if (fx.clear) o.push(`+${fx.clear} resource from every tile you clear`);
+  if (fx.off) o.push(`+${fx.off} hours of offline time`);
+  if (fx.wheel) o.push(`Daily wheel prizes ${pcT(fx.wheel)} bigger`);
+  if (fx.offm) o.push(`+${pcT(fx.offm)} offline earnings`);
+  if (fx.disc) o.push(`Prestige perks cost ${pcT(fx.disc)} less`);
+  return o.join(' · ');
+}
+const SKILL_BR = SK_DEF.map(br => ({id:br.id, ic:br.ic, name:br.name, nodes:br.nodes.map((n,i) => ({id:`t_${br.pre}${i+1}`, ic:n[0], name:n[1], fx:n[2], key:n[3]?1:0, cost:SK_COSTS[i], br:br.id, i,
+  desc:(n[3] ? 'KEYSTONE: ' : '') + skFxText(n[2])}))}));
 const skNode = id => { for (const br of SKILL_BR) for (const n of br.nodes) if (n.id===id) return n; return null; };
 const skPrev = n => n && n.i>0 ? SKILL_BR.find(b=>b.id===n.br).nodes[n.i-1] : null;
 const skData = (P, make) => { if (!P) return null; if (!P._sk || typeof P._sk !== 'object'){ if (!make) return null; P._sk = {n:{}}; } if (!P._sk.n || typeof P._sk.n !== 'object') P._sk.n = {}; return P._sk; };
 const skIn = (P, id) => { const d = skData(P, false); return d && (d.n[id]|0) > 0 ? 1 : 0; };
 const sk = id => skIn(S && S.perks, id);
-const skSpent = () => { const d = skData(S.perks, false); return d ? Object.keys(d.n).filter(k => d.n[k]).length : 0; };
+let skCache = {ref:null, v:-1, s:{}};
+function skSums(){
+  const d = skData(S && S.perks, false); if (!d) return {};
+  if (skCache.ref === d && skCache.v === (d.v|0)) return skCache.s;
+  const s = {}; for (const br of SKILL_BR) for (const n of br.nodes) if ((d.n[n.id]|0) > 0) for (const k in n.fx) s[k] = (s[k]||0) + n.fx[k];
+  skCache = {ref:d, v:d.v|0, s}; return s;
+}
+const skf = k => skSums()[k] || 0;
+const skSpent = () => { const d = skData(S.perks, false); if (!d) return 0; let t = 0; for (const br of SKILL_BR) for (const n of br.nodes) if ((d.n[n.id]|0) > 0) t += n.cost; return t; };
 function skBonus(){
   const d = skData(S.perks, true);
-  if (TEST_MODE && d.bonus == null){ const v = +new URLSearchParams(location.search).get('sp'); d.bonus = v >= 0 && v <= 15 && new URLSearchParams(location.search).has('sp') ? v|0 : 6; }
+  if (TEST_MODE && d.bv !== 3){ // prototype save from an older tree layout: reset nodes, grant test points
+    const q = new URLSearchParams(location.search), v = +q.get('sp');
+    d.n = {}; d.v = (d.v|0) + 1; d.bv = 3; d.bonus = q.has('sp') && v >= 0 && v <= 60 ? v|0 : 20;
+  }
   return d.bonus|0;
 }
 const skTotal = () => (S.asc|0) + skBonus();            // 1 skill point per Ascension (retroactive)
 const skFree = () => Math.max(0, skTotal() - skSpent());
 const skLocked = n => { const pv = skPrev(n); return !!(pv && !sk(pv.id)); };
-const skBuyable = n => !sk(n.id) && !skLocked(n) && skFree() >= 1;
+const skBuyable = n => !sk(n.id) && !skLocked(n) && skFree() >= n.cost;
 const skAnyBuyable = () => SKILL_BR.some(br => br.nodes.some(skBuyable));
-const skHarv = () => 1 + 0.05*(sk('t_p1')+sk('t_p4')) + 0.20*sk('t_p5');
-const skCraft = () => 1 + 0.05*(sk('t_p2')+sk('t_p4')) + 0.20*sk('t_p5');
-const skBelt = () => 1 + 0.05*(sk('t_l1')+sk('t_l3')) + 0.25*sk('t_l5');
-const skThrift = () => Math.pow(0.95, sk('t_l2'));
-const skClear = () => sk('t_e1') + 2*sk('t_e5');
-const skOffMul = () => 1 + 0.05*sk('t_e4') + 0.10*sk('t_e5');
-const skWheelMul = () => 1 + 0.10*sk('t_e3') + 0.25*sk('t_e5');
+const skHarv = () => 1 + skf('harv');
+const skCraft = () => 1 + skf('craft');
+const skBelt = () => 1 + skf('belt');
+const skThrift = () => 1 - Math.min(0.5, skf('thr'));
+const skClear = () => skf('clear')|0;
+const skOffMul = () => 1 + skf('offm');
+const skWheelMul = () => 1 + skf('wheel');
+const skDisc = () => Math.min(0.5, skf('disc'));
 const perkDef = id => PERKS.find(p=>p.id===id);
-const perkCost = id => { const p = perkDef(id); if (p && p.cost != null) return p.cost; return perk(id) + 1; };
+const perkBase = id => { const p = perkDef(id); if (p && p.cost != null) return p.cost; return perk(id) + 1; };
+const perkCost = id => { const b = perkBase(id), d = skDisc(); return d > 0 ? Math.max(1, Math.round(b*(1-d))) : b; }; // Skill Tree: Prestige branch discount
 const megaUnlocked = type => { const B = BUILDINGS[type]; return !B.unlockPerk || perk(B.unlockPerk) > 0; };
 
 const MAP_W = 200, MAP_H = 200, CHUNK = 16, SPACING = 0.5, OFFLINE_BASE = 24*3600, OFFLINE_RATE = 0.55, RESERVE = 12; // Builderment-scale map; crafters leave RESERVE of each item in the Hub for building
@@ -1036,7 +1073,7 @@ function freshState(prev){
   const st = { v:SAVE_V, seed:(Math.random()*1e9)|0, rebirths:p.rebirths, asc:p.asc|0, pp:p.pp, perks:p.perks, sound:p.sound!==false,
     hub:null, b:[], uid:1, stock:{}, quest:0, qprog:0, unlocks:eraUnlocks(p.rebirths), built:{}, last:Date.now(), finalDone:false, totalDelivered:{}, cleared:[], hutWear:{}, hutsGone:1,
     terrGen: terrGenForAsc(p.asc|0), islandGenV: isIslandAsc(p.asc|0) ? 2 : 0, landScaleV: 2, hubExt5: 1, eraCap: p.eraCap != null ? p.eraCap : cycleLen(p.asc|0) };
-  const skHS = skIn(p.perks, 't_l4') ? 1 : 0;
+  const skHS = skIn(p.perks, 't_l3') ? 1 : 0;
   const hs = ((p.perks && p.perks.start) || 0) + 2*skHS, un = st.unlocks;
   const sp = ((p.perks && p.perks.stockpile)||0) + skHS;
   st.stock.wood = 12 + 10*hs + 18*sp; if (sp) st.stock.stone = (st.stock.stone||0) + 18*sp;
@@ -1058,7 +1095,7 @@ const has = u => S.unlocks.includes(u);
 const qScale = () => 1 + 0.25*Math.max(0, S.rebirths - lastEraOf()); // costs only grow if a cycle somehow overruns its cap
 const questN = q => q.n;
 const curQuest = () => S.quest === 0 ? eraQuest(S.rebirths) : null;
-const offCap = () => OFFLINE_BASE + 12*3600*perk('offline') + 6*3600*sk('t_e2');
+const offCap = () => OFFLINE_BASE + 12*3600*perk('offline') + 3600*skf('off');
 const perkSpeed = (lv, step) => 1 + step*(lv<=2 ? lv : 2 + 0.25*(lv-2)); // diminishing after 2 (caps ~1.5× at lv5 w/ 0.18)
 const harvestMul = () => perkSpeed(perk('swift'), 0.18) * skHarv() * prodMul() * PACE_PROD;
 const craftMul = () => perkSpeed(perk('craft'), 0.18) * skCraft() * prodMul() * PACE_PROD;
@@ -2407,7 +2444,7 @@ const craftRate = b => { const B=BUILDINGS[b.type]; return craftMul()*lvSpeed(b.
 // how many of ingredient k this crafter wants on hand (buffer + on its belt): enough to cover the belt trip plus 3 batches
 function inTarget(b, k){ const r = RECIPES[b.recipe], travel = (b.inPath ? b.inPath.len : 2)/beltSpeed(); return Math.ceil(r.in[k]*(craftRate(b)*(travel+0.5) + 3)); }
 function crafterAccepts(b, id){ const r = RECIPES[b.recipe]; return r && r.in[id] && (b.buf[id]||0) < inTarget(b, id) + 2*bundleFor(r.in[id]*craftRate(b)); }
-const peakMul = b => ((b.lv||1) >= 2 || perk('lucky') || perk('fortune') || sk('t_p3')) ? 2 : 1; // belts sized for doubles
+const peakMul = b => ((b.lv||1) >= 2 || perk('lucky') || perk('fortune') || skf('dbl') > 0) ? 2 : 1; // belts sized for doubles
 const outCap = b => { const r = RECIPES[b.recipe]; return Math.max(4, r.out*2*3, 3*bundleFor(r.out*peakMul(b)*craftRate(b))); };
 function stepPath(p, dt){
   const v = beltSpeed()*dt;
@@ -5986,7 +6023,8 @@ function iapDetect(){
 function perkSpent(perks){
   let n = 0; const P = perks || S.perks || {};
   for (const id in P){ const L = P[id]|0, d = PERKS.find(p=>p.id===id); if (!d || L<=0) continue; n += d.cost != null ? d.cost*L : L*(L+1)/2; }
-  return n;
+  n -= ((P._sk && P._sk.saved)|0); // ✦ the Skill Tree discount already saved on purchases
+  return Math.max(0, n);
 }
 const perkOfType = t => { const B = BUILDINGS[t]; return B ? (B.unlockPerk || (B.hut ? t : null)) : null; };
 // Perk Respec: refund every perk ✦, clear perks, remove placed buildings that needed a refunded perk.
@@ -6187,49 +6225,51 @@ function shopTabs(on){
 function wireShopTabs(){
   sheet.querySelectorAll('.shop-tabs [data-go]').forEach(el => el.onclick = () => { sfx('click'); const g = el.dataset.go; if (g==='perks') openPerks(); else if (g==='skills') openSkills(); else openCosmetics(); });
 }
-function skDefaultSel(){
-  const all = []; SKILL_BR.forEach(br => br.nodes.forEach(n => all.push(n)));
-  const open = all.filter(n => !sk(n.id) && !skLocked(n));
-  return (open[0] || all[0]).id;
-}
+function skBranchDefault(){ const br = SKILL_BR.find(b => b.nodes.some(skBuyable)); return (br || SKILL_BR.find(b => b.nodes.some(n => !sk(n.id))) || SKILL_BR[0]).id; }
+function skSelDefault(br){ const n = br.nodes.find(x => !sk(x.id)); return (n || br.nodes[br.nodes.length-1]).id; }
 function openSkills(first){
   R.dkTab = 'skill';
   let firstRender = first !== false;
   const render = () => {
-    if (!R.skSel || !skNode(R.skSel)) R.skSel = skDefaultSel();
+    if (!R.skBr || !SKILL_BR.find(b => b.id === R.skBr)) R.skBr = skBranchDefault();
+    const br = SKILL_BR.find(b => b.id === R.skBr);
+    if (!R.skSel || !skNode(R.skSel) || skNode(R.skSel).br !== br.id) R.skSel = skSelDefault(br);
     const n = skNode(R.skSel), owned = !!sk(n.id), locked = skLocked(n), pv = skPrev(n), free = skFree(), tot = skTotal();
     let buy;
     if (owned) buy = `<button class="btn sk-buy" disabled>✓ Owned</button>`;
     else if (locked) buy = `<button class="btn sk-buy" disabled>🔒 Buy ${pv.name} first</button>`;
-    else if (free < 1) buy = `<button class="btn sk-buy" disabled>No skill points</button>`;
-    else buy = `<button class="btn sk-buy" data-skbuy="${n.id}">Buy · 1 🌳</button>`;
-    const det = `<div class="sk-det${n.key?' key':''}"><div class="sk-di">${n.ic}</div><div class="sk-db"><b>${n.name}</b><span>${n.desc}</span></div>${buy}</div>`;
-    const cols = SKILL_BR.map(br => {
-      const got = br.nodes.filter(x => sk(x.id)).length;
-      const nodes = br.nodes.map((x, i) => {
-        const o = !!sk(x.id), lk = skLocked(x), can = !o && !lk && free >= 1;
-        const st = o ? 'own' : lk ? 'lock' : can ? 'can' : 'need';
-        const line = i ? `<div class="sk-ln${sk(br.nodes[i-1].id)?' on':''}"></div>` : '';
-        return line + `<button type="button" class="sk-n st-${st}${x.key?' key':''}${x.id===R.skSel?' sel':''}${R.skPop===x.id?' pop':''}" data-sk="${x.id}" aria-label="${x.name}"><span class="sk-c">${x.key?'<u>★</u>':''}${x.ic}${o?'<i class="sk-chk">✓</i>':''}</span><b>${x.name}</b><em>${o?'Owned':lk?'🔒':'1 🌳'}</em></button>`;
-      }).join('');
-      return `<div class="sk-col"><div class="sk-hd"><span>${br.ic}</span><b>${br.name}</b><small>${got}/${br.nodes.length}</small></div>${nodes}</div>`;
+    else if (free < n.cost) buy = `<button class="btn sk-buy" disabled>Need ${n.cost-free} more 🌳</button>`;
+    else buy = `<button class="btn sk-buy" data-skbuy="${n.id}">Buy · ${n.cost} 🌳</button>`;
+    const det = `<div class="sk-det${n.key?' key':''}"><div class="sk-di">${n.ic}</div><div class="sk-db"><b>${n.name} <i class="sk-cost">${n.cost} 🌳</i></b><span>${n.desc}</span></div>${buy}</div>`;
+    const tabs = SKILL_BR.map(b => { const got = b.nodes.filter(x => sk(x.id)).length, can = b.nodes.some(skBuyable);
+      return `<button type="button" class="sk-tab${b.id===br.id?' on':''}" data-skbr="${b.id}"><span>${b.ic}</span><b>${b.name}</b><small>${got}/${b.nodes.length}${can?' <u class="sk-dot2"></u>':''}</small></button>`; }).join('');
+    const rows = br.nodes.map((x, i) => {
+      const o = !!sk(x.id), lk = skLocked(x), can = !o && !lk && free >= x.cost;
+      const st = o ? 'own' : lk ? 'lock' : can ? 'can' : 'need';
+      const last = i === br.nodes.length - 1;
+      return `<button type="button" class="sk-row st-${st}${x.key?' key':''}${x.id===R.skSel?' sel':''}${R.skPop===x.id?' pop':''}" data-sk="${x.id}" aria-label="${x.name}">
+        <span class="sk-rc"><span class="sk-c">${x.key?'<u>★</u>':''}${x.ic}${o?'<i class="sk-chk">✓</i>':''}</span>${last?'':`<i class="sk-ln${o?' on':''}"></i>`}</span>
+        <span class="sk-rt"><b>${x.name}</b><small>${x.desc}</small></span>
+        <em class="sk-pr">${o?'✓':lk?'🔒 '+x.cost+' 🌳':x.cost+' 🌳'}</em></button>`;
     }).join('');
     R.skPop = null;
     const html = `${shopTabs('skills')}
       <div class="sk" style="--sk:${skAccent()}">
         <div class="sk-pts"><div class="sk-pn"><span>🌳</span><b>${free}</b></div><div class="sk-pt"><b>Skill Points to spend</b><small>1 for every Ascension · ${tot} earned, ${skSpent()} used</small></div></div>
-        ${det}<div class="sk-grid">${cols}</div>
+        <div class="sk-tabs">${tabs}</div>
+        ${det}<div class="sk-list">${rows}</div>
         ${TEST_MODE ? `<div class="sk-test"><button type="button" class="btn sk-tb" data-a="skplus">Test: +1 skill point</button><button type="button" class="btn sk-tb" data-a="skrespec">Test: respec (refund all)</button></div>` : ''}
       </div>`;
     openSheet(html, undefined, firstRender ? undefined : {keep:true}); firstRender = false; sheet.classList.add('sk-full');
     wireShopTabs();
+    sheet.querySelectorAll('[data-skbr]').forEach(el => el.onclick = () => { sfx('click'); R.skBr = el.dataset.skbr; R.skSel = null; render(); });
     sheet.querySelectorAll('[data-sk]').forEach(el => el.onclick = () => { sfx('click'); R.skSel = el.dataset.sk; render(); });
     const bb = sheet.querySelector('[data-skbuy]'); if (bb) bb.onclick = () => {
       const d = skNode(bb.dataset.skbuy); if (!d || !skBuyable(d)) return;
-      skData(S.perks, true).n[d.id] = 1; sfx('upgrade'); vibrate(20); R.skPop = d.id;
+      const D = skData(S.perks, true); D.n[d.id] = 1; D.v = (D.v|0) + 1; sfx('upgrade'); vibrate(20); R.skPop = d.id;
       const nxt = SKILL_BR.find(b=>b.id===d.br).nodes[d.i+1]; R.skSel = nxt ? nxt.id : null; R.dirty = true; save(); render(); };
     const tr = sheet.querySelector('[data-a=skrespec]'); if (tr) tr.onclick = () => { const r = applyRespec(); R.skSel = null; toast('Test respec: skill points & perks refunded', 2500); render(); };
-    const tp = sheet.querySelector('[data-a=skplus]'); if (tp) tp.onclick = () => { const d = skData(S.perks, true); skBonus(); d.bonus = (d.bonus|0) + 1; save(); render(); };
+    const tp = sheet.querySelector('[data-a=skplus]'); if (tp) tp.onclick = () => { skBonus(); const d = skData(S.perks, true); d.bonus = (d.bonus|0) + 1; save(); render(); };
   };
   render(); navSel('bPerk');
 }
@@ -6246,7 +6286,7 @@ function openPerks(){
         <div class="rb-next">${img(nx.item)}<div><small>Next era: ${eraName(S.rebirths+1)}</small><b>${nx.kind}: ${nx.text}</b></div></div>
         ${can ? `<button class="btn gold rb-go" data-a="rb">${S.rebirths>=lastEraOf()?(ascGated()?"⭐ Ascend now · Ascension Pass":`Ascend now · +${ascendPts((S.asc|0)+1)} ✦`):"Rebirth now · +1 ✦"}</button>` : `<div class="rb-lock">🔒 Finish this era's quest to rebirth. Each rebirth gives 1 ✦; Ascending gives 10 ✦, then 20, then 30…</div>`}
       </div>
-      <h3 class="sl-h">Perk shop <span class="pk-sub">permanent · banked ✦ stay forever</span></h3>` +
+      <h3 class="sl-h">Perk shop <span class="pk-sub">permanent · banked ✦ stay forever${skDisc()>0?` · 🌳 ${pcT(skDisc())} off`:''}</span></h3>` +
       (() => {
         const row = p => { const L = perk(p.id), cost = perkCost(p.id), max = L>=p.max;
           return `<div class="opt pk${p.mega?' mega':''}"><div class="oi pk-ic">${p.ic}</div><div class="ob"><div class="on">${p.name}${p.mega?' <span class="mega-tag">MEGA</span>':''}</div>${p.max>1?`<div class="pk-pips">${Array.from({length:p.max},(_,i)=>`<i class="${i<L?'on':''}"></i>`).join('')}</div>`: (L?`<div class="pk-own">✓ Unlocked</div>`:`<div class="pk-costline">${cost} ✦ once</div>`)}<div class="od">${p.desc}</div></div><button class="btn gold" data-p="${p.id}" ${max||S.pp<cost?'disabled':''}>${max?'OWNED':cost+' ✦'}</button></div>`; };
@@ -6255,7 +6295,7 @@ function openPerks(){
       })());
     const rb = sheet.querySelector('[data-a=rb]'); if (rb) rb.onclick = () => doRebirth();
     sheet.querySelectorAll('[data-iap]').forEach(el => el.onclick = () => openIapScreen(el.dataset.iap, {onDone: () => { if (sheetWrap.classList.contains('open')) render(); }}));
-    sheet.querySelectorAll('[data-p]').forEach(el => el.onclick = () => { const p = PERKS.find(p=>p.id===el.dataset.p), cost = perkCost(p.id); if (S.pp < cost || perk(p.id) >= p.max) return; S.pp -= cost; S.perks[p.id] = perk(p.id)+1; sfx('upgrade'); save(); render(); });
+    sheet.querySelectorAll('[data-p]').forEach(el => el.onclick = () => { const p = PERKS.find(p=>p.id===el.dataset.p), cost = perkCost(p.id); if (S.pp < cost || perk(p.id) >= p.max) return; const base = perkBase(p.id); S.pp -= cost; S.perks[p.id] = perk(p.id)+1; if (base > cost){ const d = skData(S.perks, true); d.saved = (d.saved|0) + (base - cost); } sfx('upgrade'); save(); render(); });
     wireShopTabs();
   };
   render(); navSel('bPerk');
